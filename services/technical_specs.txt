@@ -1,0 +1,47 @@
+
+TECHNICAL SPECIFICATION: STYLE GENERATION & GOVERNANCE (V83)
+===========================================================
+Objective: Strict adherence to genre physics via Governor/Conductor architecture.
+
+1. GOA TRANCE (604)
+-------------------
+- Bass Mode: GATED (Intermittent flow, allows Pad breathing)
+- Lead Strategy: CALL_RESPONSE (Strict 8-bar phrasing)
+- Lead Scarcity: 16 Bars (Requires "Journey" silence between "Statements")
+- Humanization Cap: 0.20 (Organic variance allowed)
+- Density: MED (60% artificial cap on generated notes)
+- Dominant Pool: Arp A (Primary), Lead A (Secondary)
+- Structure: Long Intro (20%), Gradual build, Spiritual Breaks.
+
+2. PSYTRANCE (FULL-ON)
+----------------------
+- Bass Mode: CONTINUOUS (K-B-B-B Rolling)
+- Lead Strategy: CONTINUOUS (Constant presence)
+- Lead Scarcity: 4 Bars (Frequent interaction)
+- Humanization Cap: 0.15 (Tight control for drive)
+- Density: HIGH
+- Dominant Pool: Lead A, Acid
+- Structure: Standard (Intro 10%, Drop 25%)
+
+3. TECHNO (PEAK TIME)
+---------------------
+- Bass Mode: SPARSE (Rumble/Offbeat only, No rolling lines)
+- Lead Strategy: MINIMAL (Textures, Stabs, No melodies)
+- Lead Scarcity: 32 Bars (Very rare, high impact)
+- Humanization Cap: 0.10 (Machine precision)
+- Density: LOW
+- Dominant Pool: Kick, Rumble
+- Structure: DJ Tool (Intro 20%, Loop-based)
+
+4. MELODIC TECHNO
+-----------------
+- Bass Mode: GATED (Plucks with space)
+- Lead Strategy: MINIMAL (Long sustained emotional notes)
+- Lead Scarcity: 16 Bars (Emotional arcs)
+- Humanization Cap: 0.30 (High expression allowed)
+- Density: MED
+
+GOVERNANCE LOGIC (The "Conductor"):
+1. Intent Check: Before generating a phrase, check "Bars Since Last Lead".
+2. Decision: If < Scarcity Limit, FORCE REST (Silence).
+3. Dominance Arbitration: If Lead A is active, Lead B is suppressed (-12dB/Silence).

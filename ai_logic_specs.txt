@@ -1,0 +1,39 @@
+
+SYSTEM INTELLIGENCE & CONNECTIVITY SPECIFICATION (V70)
+=====================================================
+Architecture: Hybrid AI/Algorithmic Pipeline
+
+1. GLOBAL ENGINE (services/globalEngineService.ts)
+-----------------------------------------------
+- Function: Simulates connection to global market data.
+- Sync Rate: Every session start.
+- Logic:
+  - Fetches regional trends (TLV, BER, MEL).
+  - Injects Context: "Trending 146 BPM in Israel", "Focus on FM Leads".
+  - Adjusts base generation parameters based on trend data.
+
+2. GEMINI PRO 3 INTEGRATION (services/geminiService.ts)
+------------------------------------------------------
+- Model: gemini-3.1-pro-preview
+- Role: "Elite Producer Protocol"
+- Prompt Structure:
+  - SYSTEM: "You are a World-Class Music Producer."
+  - CONTEXT: Global Engine Injection + User Narrative.
+  - CONSTRAINTS: Strict 16-channel manifest (Elite 16).
+  - FORMAT: JSON (GrooveObject schema).
+- Fallback: Hardcoded algorithmic generation if API fails (Circuit Breaker).
+
+3. REFINEMENT ENGINE (services/engineProfileService.ts)
+----------------------------------------------------
+- Feedback Loop: User ratings (1-5) + Semantic Tags ("Boring", "No Hook").
+- Optimization:
+  - Updates 'GenreProfile' weights (Density, Velocity Bias).
+  - Persists learned preferences to LocalStorage ('EMG_ENGINE_STATE').
+  - Self-Healing: Reverts weights if rating drops below 3.0.
+
+4. INTENT ENGINE (The Conductor)
+--------------------------------
+- Location: services/maestroService.ts
+- Logic: Evaluates "Meaning vs Motion".
+- Rule: "Has enough 'Journey' passed to justify a 'Statement'?"
+- Action: Denies Lead generation if scarcity rules are not met, forcing Arp/Pad dominance.

@@ -1,0 +1,3 @@
+
+// ... existing code in handleMidiGeneration logic or similar ...
+// Inside the job processing logic, we'll ensure the UI knows which profile is active.
