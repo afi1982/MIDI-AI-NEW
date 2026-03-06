@@ -14,6 +14,7 @@ export const ELITE_16_CHANNELS: ChannelKey[] = [
 export const SUPPORTED_CHANNELS: ChannelKey[] = [...ELITE_16_CHANNELS];
 
 const TICKS_PER_BAR = 1920;
+const TICKS_PER_16TH = 120;
 
 export interface GenerationMetadata {
     sourceFilesUsed: string[];
@@ -22,6 +23,29 @@ export interface GenerationMetadata {
 }
 
 export class MaestroClass {
+    private renderSeedBar(channel: ChannelKey, barIndex: number, seedNotes: any[] = []): NoteEvent[] {
+        if (!Array.isArray(seedNotes) || seedNotes.length === 0) return [];
+        const baseTick = barIndex * TICKS_PER_BAR;
+
+        return seedNotes.map((seed: any, idx: number) => {
+            const step = Math.max(0, Math.min(15, Math.round(seed.s || 0)));
+            const durationTicks = Math.max(30, Math.min(240, Math.round(seed.d || 120)));
+            const velocityBase = Math.max(0.35, Math.min(1, Number(seed.v || 0.8)));
+            const variation = (idx % 4 === 0 && channel !== 'ch1_kick') ? 0.04 : 0;
+            const velocity = Math.max(0.3, Math.min(1, velocityBase - variation));
+            const startTick = baseTick + (step * TICKS_PER_16TH);
+
+            return {
+                note: seed.n || 'C3',
+                time: `${barIndex}:${Math.floor(step / 4)}:${step % 4}`,
+                duration: '16n',
+                durationTicks,
+                startTick,
+                velocity
+            };
+        });
+    }
+
     public async generateGroove(params: any, trackLengthMinutes: number, channels: ChannelKey[]): Promise<GrooveObject> {
         const bpm = params.bpm || 145;
         const totalBars = Math.ceil((trackLengthMinutes * bpm) / 4);
@@ -59,9 +83,13 @@ export class MaestroClass {
 
         ELITE_16_CHANNELS.forEach(ch => groove[ch] = []);
 
+        const seedPatterns = params?.patterns || {};
+
         for (let b = 0; b < totalBars; b++) {
             channels.forEach(ch => {
-                const notes = this.generateSingleBar(ch, b, groove.bpm, groove.key, groove.scale, 'COMPLEX', undefined, undefined, groove.genre as MusicGenre);
+                const seededBar = this.renderSeedBar(ch, b, seedPatterns?.[ch]?.notes || []);
+                const generatedBar = this.generateSingleBar(ch, b, groove.bpm, groove.key, groove.scale, 'COMPLEX', undefined, undefined, groove.genre as MusicGenre);
+                const notes = seededBar.length > 0 ? [...seededBar, ...generatedBar.filter((n, i) => i % 3 === 0)] : generatedBar;
                 groove[ch].push(...notes);
             });
         }

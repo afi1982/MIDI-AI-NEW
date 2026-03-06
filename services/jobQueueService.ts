@@ -6,6 +6,7 @@ import { analyzeAudioChunk, sliceAudio } from './audioAnalysisService';
 import { forensicFixerService } from './forensicFixerService';
 import { contextBridge } from './contextBridgeService';
 import { midiRendererService, RenderProfile } from './midiRendererService';
+import { midiQualityService } from './midiQualityService';
 
 export type JobType = 'MIDI_GENERATION' | 'AUDIO_REGRESSION' | 'FORENSIC_ANALYSIS' | 'FORENSIC_STUDY' | 'MELODY_ARCHITECT' | 'MIDI_RENDER';
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -153,8 +154,9 @@ class JobQueueService {
         // 2. Pass merged params (user choices + AI seed) to Maestro
         const combinedContext = { ...seed, ...params };
         
-        let res = await maestroService.generateGroove(combinedContext, params.trackLengthMinutes, channels);
-        job.result = await forensicFixerService.auditAndHeal(res);
+        const rawGroove = await maestroService.generateGroove(combinedContext, params.trackLengthMinutes, channels);
+        const healedGroove = await forensicFixerService.auditAndHeal(rawGroove);
+        job.result = midiQualityService.optimizeGroove(healedGroove);
     }
 
     private async runAudioJob(job: Job) {
@@ -196,7 +198,10 @@ class JobQueueService {
         ELITE_16_CHANNELS.forEach(ch => {
             (master as any)[ch] = segments.flatMap(seg => (seg as any)[ch] || []);
         });
-        job.result = master;
+
+        // Audio-to-MIDI is especially sensitive to timing/pitch artifacts.
+        // We enforce a stricter monophonic lead cleanup and de-ghosting pass.
+        job.result = midiQualityService.optimizeGroove(master, { forceMonophonicLead: true });
     }
 
     private async runForensicStudyJob(job: Job) {
