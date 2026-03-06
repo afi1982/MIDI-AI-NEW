@@ -14,7 +14,7 @@ export const melodicComposer = {
         const motif = [];
         
         // DEFAULT DENSITY MAPS (Fallback if Engine is Empty)
-        let densityMap = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]; 
+        let densityMap = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]; // Sparse default
         
         if (genre.includes('Techno')) {
             densityMap = [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0];
@@ -22,15 +22,17 @@ export const melodicComposer = {
             densityMap = [1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0];
         } else if (genre.includes('Full-On') || genre.includes('Power')) {
             densityMap = [1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0];
+        } else if (genre.includes('Melodic')) {
+            densityMap = [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
         }
 
         // --- ENGINE ENFORCEMENT LOGIC ---
         // If we have an engine profile, we use it for rhythmic guidance.
-        const useEngineMask = engineProfile && engineProfile.rhythmMask16 && engineProfile.rhythmMask16.length > 0;
+        const useEngineMask = (engineProfile && engineProfile.rhythmMask16 && engineProfile.rhythmMask16.length > 0);
         const rhythmMask = useEngineMask ? engineProfile.rhythmMask16 : densityMap;
         
-        // If using Engine Profile, boost confidence to nearly 100% to follow the learned style.
-        const adherenceFactor = useEngineMask ? 0.95 : 0.8; 
+        // Neurokinetic Drive: If using engine mask, we follow it strictly (98% adherence)
+        const adherenceFactor = useEngineMask ? 0.98 : 0.8; 
 
         for (let i = 0; i < length; i++) {
             const isStrongBeat = i % 4 === 0;
@@ -240,13 +242,18 @@ export const melodicComposer = {
         // --- PERCUSSION ---
         else if (r.includes('PERC')) {
             const offsets = [0, 3, 5, 7]; 
+            const isLoopGanChannel = r.includes('LOOP') || r.includes('TRIBAL');
             
             for (let step = 0; step < 16; step++) {
                 let shouldHit = false;
                 let velocity = 0.8;
                 let pitchOffset = 0;
 
-                if (complexity === 'SIMPLE') {
+                // Neurokinetic Phase-Lock: If it's a Loop GAN channel, we follow the mask strictly
+                if (isLoopGanChannel && sessionMask) {
+                    shouldHit = sessionMask[step] > 0.5;
+                    velocity = sessionMask[step];
+                } else if (complexity === 'SIMPLE') {
                     if (step % 8 === 4) shouldHit = true; // Very sparse percussion
                 } else {
                     if (genre.includes('Techno')) {
@@ -277,6 +284,7 @@ export const melodicComposer = {
         else if (r.includes('LEAD') || r.includes('ARP') || r.includes('ACID') || r.includes('SYNTH')) {
             const isArp = r.includes('ARP');
             const isAcid = r.includes('ACID');
+            const isLeadB = r.includes('LEADB');
 
             for (let step = 0; step < 16; step++) {
                 const noteIndex = currentMotif[step % currentMotif.length];
@@ -288,7 +296,18 @@ export const melodicComposer = {
                 const octaveShift = Math.floor(noteIndex / scale.length);
                 let midiNote = root + (scale[scaleDegree] || 0) + (octaveShift * 12);
                 
+                // Frequency Management: Role-based octave separation to prevent "crushing"
+                if (isArp) midiNote += 12; // Arps usually higher
+                if (isLeadB) midiNote -= 12; // Lead B usually lower/harmony
+                if (isAcid) midiNote = (midiNote % 12) + 36; // Acid usually low/mid (C2 area)
+                
                 let durationTicks = isArp ? 100 : (complexity === 'SIMPLE' ? 240 : 150);
+                
+                // Add variety to duration to avoid "blocks"
+                if (Math.random() > 0.7) {
+                    durationTicks = Math.floor(durationTicks * (0.5 + Math.random()));
+                }
+
                 if (genre.includes('Melodic Techno') && !isArp && !isAcid) {
                     durationTicks = 240; 
                 }

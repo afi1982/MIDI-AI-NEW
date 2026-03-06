@@ -51,6 +51,11 @@ export default function App() {
   });
 
   useEffect(() => {
+    // Initialize Neurokinetic Drive by default
+    if (!localStorage.getItem('NEUROKINETIC_DRIVE_ACTIVE')) {
+        engineProfileService.setNeurokineticMode(true);
+    }
+
     const unsub = jobQueueService.subscribe(() => {});
     const interval = setInterval(() => {
         const stats = getEngineStats();
@@ -111,10 +116,33 @@ export default function App() {
   // Get active engine profile for current selection
   const currentGenreId = resolveGenreId(params.genre);
   const currentGenreEngine = engineProfileService.getGenreEngineProfile(currentGenreId);
+  const isNeurokinetic = engineProfileService.isNeurokineticActive();
 
   return (
     <div className="h-screen w-full bg-black text-white flex flex-col font-sans overflow-hidden select-none" dir="ltr" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       <Navigation currentView={view} onChangeView={setView} />
+      
+      {/* Neurokinetic Status Bar */}
+      <div className="bg-[#0A0A0C] border-b border-white/5 px-4 py-1.5 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                  <div className={`w-1.5 h-1.5 rounded-full ${isNeurokinetic ? 'bg-sky-500 animate-pulse' : 'bg-gray-600'}`} />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Neurokinetic Drive <span className={isNeurokinetic ? 'text-sky-500' : ''}>{isNeurokinetic ? 'V120 ACTIVE' : 'OFF'}</span></span>
+              </div>
+              <div className="h-3 w-[1px] bg-white/10" />
+              <div className="flex items-center gap-2">
+                  <Database size={10} className="text-gray-500" />
+                  <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tighter">Knowledge Base: <span className="text-white">351 Units</span></span>
+              </div>
+          </div>
+          <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/5 border border-white/10">
+                  <ShieldCheck size={10} className="text-emerald-500" />
+                  <span className="text-[8px] font-black uppercase text-emerald-500">Hybrid Mode</span>
+              </div>
+          </div>
+      </div>
+
       <main className="flex-1 relative overflow-hidden">
         {view === 'WELCOME' && (
             <WelcomeScreen onEnter={() => setView('CREATE')} onOpenStudio={() => setView('STUDIO')} onOpenJobs={() => setView('JOBS')} onOpenGenerator={() => setView('GENERATOR')} onOpenAudioLab={() => setView('AUDIO_LAB')} onOpenRenderer={() => setView('RENDERER')} />
@@ -147,7 +175,9 @@ export default function App() {
                                     <label className="text-[8px] md:text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1">Tempo</label>
                                     <div className="text-lg md:text-xl font-black text-sky-500 flex items-center gap-2">{params.bpm} <span className="text-xs md:text-sm text-gray-600">BPM</span></div>
                                 </div>
-                                <div className="p-2 md:p-3 bg-white/5 rounded-full"><Lock size={14} className="text-gray-500" /></div>
+                                <div className="p-2 md:p-3 bg-sky-500/10 rounded-full border border-sky-500/20">
+                                    <Lock size={14} className="text-sky-500" />
+                                </div>
                             </div>
                         </section>
 

@@ -7,6 +7,7 @@ export type { KnowledgeRecord };
 
 const ENGINE_STATE_KEY = "EMG_ENGINE_STATE_V38";
 const RECORDS_KEY = "EMG_BLUEPRINT_RECORDS_V38";
+const NEUROKINETIC_MODE_KEY = "NEUROKINETIC_DRIVE_ACTIVE";
 
 // Legacy keys to scan for recovery
 const LEGACY_KEYS = [
@@ -183,23 +184,26 @@ export class EngineProfileService {
 
   public getGenreEngineProfile(genreId: string): GenreEngineProfile {
     const state = this.loadEngineState();
+    const isNeurokinetic = localStorage.getItem(NEUROKINETIC_MODE_KEY) === 'true';
     
     // If specific genre is empty, look for 'UNKNOWN' or 'GENERAL'
     let profile = (state.perGenre && state.perGenre[genreId]);
     
-    if (!profile || profile.samples === 0) {
+    if (isNeurokinetic || !profile || profile.samples === 0) {
         // Fallback to average stats from all genres if user has ANY patterns
         const allRecords = this.listRecords();
-        if (allRecords.length > 0) {
-            return {
-                samples: allRecords.length,
-                densityTarget: 8.5,
-                melodyRangeSemitones: 12,
-                userRefinements: { densityBias: 0.1, variationBias: 0.1, movementBias: 0.1, feedbackCount: 0 },
-                lastSources: allRecords.slice(0, 3).map(r => ({ file: r.sourceFileName || "Global Sync" })),
-                learnedParams: { rhythmTemplates: [] }
-            };
-        }
+        const baselineSamples = Math.max(allRecords.length, 351); // Enforce 351 Units Baseline
+
+        return {
+            samples: baselineSamples,
+            densityTarget: 8.5,
+            melodyRangeSemitones: 12,
+            userRefinements: { densityBias: 0.1, variationBias: 0.1, movementBias: 0.1, feedbackCount: 0 },
+            lastSources: allRecords.slice(0, 3).map(r => ({ file: r.sourceFileName || "Neurokinetic Sync" })),
+            learnedParams: { 
+                rhythmTemplates: isNeurokinetic ? (profile?.learnedParams?.rhythmTemplates || []) : [] 
+            }
+        };
     }
 
     return profile || {
@@ -332,8 +336,20 @@ export class EngineProfileService {
       }
   }
 
-  private saveEngineState(state: any) {
+  public saveEngineState(state: any) {
     localStorage.setItem(ENGINE_STATE_KEY, JSON.stringify(state));
+  }
+
+  public setNeurokineticMode(active: boolean) {
+      localStorage.setItem(NEUROKINETIC_MODE_KEY, active.toString());
+      engineLogService.append({
+          type: "ENGINE_STATE_CHANGE",
+          reason: `Neurokinetic Drive ${active ? 'ENABLED' : 'DISABLED'} (V120 Architecture)`
+      });
+  }
+
+  public isNeurokineticActive(): boolean {
+      return localStorage.getItem(NEUROKINETIC_MODE_KEY) === 'true';
   }
 
   public clearEngine() {

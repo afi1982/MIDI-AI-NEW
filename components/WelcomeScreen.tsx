@@ -34,8 +34,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
       <div className="relative z-10 flex flex-col items-center px-4 md:px-8 pt-12 max-w-7xl mx-auto">
           <div className="text-center mb-16 space-y-4">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-[0.2em] text-sky-400 mb-4">
-                  MIDI AI V1.0
+              <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-[0.2em] text-sky-400 mb-4">
+                  <Cpu size={12} />
+                  NEUROKINETIC DRIVE V120
               </div>
               <h1 className="text-5xl md:text-8xl font-black tracking-tighter italic leading-none">
                   MIDI <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-fuchsia-500">AI</span>
