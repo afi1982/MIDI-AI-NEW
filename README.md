@@ -18,3 +18,12 @@ View your app in AI Studio: https://ai.studio/apps/83ac666f-22b9-4cbe-b476-dcaf4
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## New: Subtitle Lab
+
+The app now includes a **Subtitle Lab** module for:
+- Audio/video transcription
+- Multi-language subtitle translation
+- Subtitle editing (timings + text)
+- TikTok-style subtitle design presets
+- Export to **SRT**, **VTT**, and project JSON
