@@ -13,7 +13,6 @@ import { forensicAuditorService } from './services/forensicAuditorService.ts';
 import { SingleChannelGenerator } from './components/SingleChannelGenerator.tsx';
 import { AudioLab } from './components/AudioLab.tsx';
 import { AudioRenderer } from './components/AudioRenderer.tsx';
-import { SubtitleLab } from './components/SubtitleLab.tsx';
 import { getEngineStats, engineProfileService, resolveGenreId } from './services/engineProfileService';
 
 const GENRE_BPM_MAP: Record<MusicGenre, number> = {
@@ -24,9 +23,9 @@ const GENRE_BPM_MAP: Record<MusicGenre, number> = {
     [MusicGenre.TECHNO_PEAK]: 132
 };
 
-type ViewType = 'WELCOME' | 'CREATE' | 'STUDIO' | 'AUDIO_LAB' | 'SUBTITLE_LAB' | 'GENERATOR' | 'JOBS' | 'RENDERER';
+type ViewType = 'WELCOME' | 'CREATE' | 'STUDIO' | 'AUDIO_LAB' | 'GENERATOR' | 'JOBS' | 'RENDERER';
 
-const NAV_ORDER: ViewType[] = ['WELCOME', 'CREATE', 'STUDIO', 'AUDIO_LAB', 'SUBTITLE_LAB', 'GENERATOR', 'RENDERER', 'JOBS'];
+const NAV_ORDER: ViewType[] = ['WELCOME', 'CREATE', 'STUDIO', 'AUDIO_LAB', 'GENERATOR', 'RENDERER', 'JOBS'];
 
 export default function App() {
   const [view, setView] = useState<ViewType>('WELCOME');
@@ -146,13 +145,12 @@ export default function App() {
 
       <main className="flex-1 relative overflow-hidden">
         {view === 'WELCOME' && (
-            <WelcomeScreen onEnter={() => setView('CREATE')} onOpenStudio={() => setView('STUDIO')} onOpenJobs={() => setView('JOBS')} onOpenGenerator={() => setView('GENERATOR')} onOpenAudioLab={() => setView('AUDIO_LAB')} onOpenSubtitleLab={() => setView('SUBTITLE_LAB')} onOpenRenderer={() => setView('RENDERER')} />
+            <WelcomeScreen onEnter={() => setView('CREATE')} onOpenStudio={() => setView('STUDIO')} onOpenJobs={() => setView('JOBS')} onOpenGenerator={() => setView('GENERATOR')} onOpenAudioLab={() => setView('AUDIO_LAB')} onOpenRenderer={() => setView('RENDERER')} />
         )}
         {view === 'STUDIO' && <StudioPage initialGroove={groove} onUpdate={setGroove} onClose={() => setView('JOBS')} />}
         {view === 'JOBS' && <JobsCenterPage onOpenGroove={handleOpenProjectInReview} onClose={() => setView('WELCOME')} />}
         {view === 'GENERATOR' && <SingleChannelGenerator onClose={() => setView('WELCOME')} />}
         {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('WELCOME')} />}
-        {view === 'SUBTITLE_LAB' && <SubtitleLab onClose={() => setView('WELCOME')} />}
         {view === 'RENDERER' && <AudioRenderer onClose={() => setView('WELCOME')} />}
 
         {view === 'CREATE' && (

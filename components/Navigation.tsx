@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Home, Zap, Sliders, ListChecks, AudioWaveform, Music, Activity, FileAudio, Cpu, FileText } from 'lucide-react';
+import { Home, Zap, Sliders, ListChecks, AudioWaveform, Music, Activity, FileAudio, Cpu } from 'lucide-react';
 import { jobQueueService } from '../services/jobQueueService';
 import { getEngineStats, engineProfileService } from '../services/engineProfileService';
 
@@ -41,7 +41,6 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, onChangeVie
     { id: 'CREATE', label: 'Generator', icon: Zap },
     { id: 'STUDIO', label: 'Studio', icon: Sliders },
     { id: 'AUDIO_LAB', label: 'Audio to MIDI', icon: AudioWaveform },
-    { id: 'SUBTITLE_LAB', label: 'Subtitle Lab', icon: FileText },
     { id: 'RENDERER', label: 'MIDI to Audio', icon: FileAudio },
     { id: 'GENERATOR', label: 'Loop Generator', icon: Music },
     { id: 'JOBS', label: 'Tasks', icon: ListChecks, badge: jobsCount > 0 ? jobsCount : null },

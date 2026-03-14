@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Zap, Sliders, AudioWaveform, Cpu, Music, ListChecks, FileAudio, FileText } from 'lucide-react';
+import { Zap, Sliders, AudioWaveform, Cpu, Music, ListChecks, FileAudio } from 'lucide-react';
 
 interface WelcomeScreenProps {
   onEnter: () => void; 
@@ -8,13 +8,12 @@ interface WelcomeScreenProps {
   onOpenJobs?: () => void;
   onOpenGenerator?: () => void;
   onOpenAudioLab?: () => void;
-  onOpenSubtitleLab?: () => void;
   onOpenRenderer?: () => void;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ 
     onEnter, onOpenStudio, 
-    onOpenJobs, onOpenGenerator, onOpenAudioLab, onOpenSubtitleLab, onOpenRenderer
+    onOpenJobs, onOpenGenerator, onOpenAudioLab, onOpenRenderer
 }) => {
   
   const TILES = [
@@ -22,7 +21,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       { id: 'studio', label: 'Studio Editor', sub: 'Edit & Mix', icon: Sliders, action: onOpenStudio, color: 'white' },
       { id: 'generator', label: 'Loop Generator', sub: 'Single Track Builder', icon: Music, action: onOpenGenerator, color: 'emerald' },
       { id: 'audiolab', label: 'Audio to MIDI', sub: 'Convert Audio to MIDI', icon: AudioWaveform, action: onOpenAudioLab, color: 'blue' },
-      { id: 'subtitlelab', label: 'Subtitle Lab', sub: 'Transcribe + Translate + Style', icon: FileText, action: onOpenSubtitleLab, color: 'cyan' },
       { id: 'renderer', label: 'MIDI to Audio', sub: 'Convert MIDI to WAV/MP3', icon: FileAudio, action: onOpenRenderer, color: 'fuchsia' },
       { id: 'jobs', label: 'Task List', sub: 'Background Progress', icon: ListChecks, action: onOpenJobs, color: 'orange' },
   ];
