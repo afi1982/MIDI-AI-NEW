@@ -1,11 +1,15 @@
 # Subtitle Studio (Standalone)
 
-A fully separate, mobile-first app for:
+A fully separate, mobile-first + desktop-ready app for:
 - Audio/video transcription
 - Subtitle translation to any language
+- Multi-file batch queue processing
 - Cue timing/text editing
 - TikTok-style subtitle design preview
-- Export to SRT / VTT / JSON
+- Subtitle import (SRT / VTT / JSON)
+- Export to SRT / VTT / CSV / JSON
+- Readability quality scoring + timing auto-fix
+- Session auto-recovery from local storage
 
 ## Run
 

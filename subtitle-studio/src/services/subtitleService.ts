@@ -1,7 +1,17 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import type { SubtitleCue, SubtitleTranscriptionOptions } from '../types';
+import type {
+  SubtitleCue,
+  SubtitleTranscriptionOptions,
+  SubtitleQualityIssue,
+  SubtitleQualityReport
+} from '../types';
 
-const MODELS = ['gemini-3-pro-preview', 'gemini-3-flash-preview'];
+const PROFILE_MODELS: Record<SubtitleTranscriptionOptions['aiProfile'], string[]> = {
+  SPEED: ['gemini-3-flash-preview', 'gemini-3-pro-preview'],
+  BALANCED: ['gemini-3-pro-preview', 'gemini-3-flash-preview'],
+  MAX_QUALITY: ['gemini-3-pro-preview', 'gemini-3-flash-preview']
+};
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const transcriptionSchema = {
@@ -95,7 +105,8 @@ export const transcribeAndTranslateMedia = async (
 
   onProgress?.(10);
 
-  const prompt = `You are a professional subtitle engine for short-form social media.
+  const models = PROFILE_MODELS[options.aiProfile] || PROFILE_MODELS.BALANCED;
+  const prompt = `You are a professional subtitle engine for short-form social media and long-form interviews.
 Transcribe the speech and create subtitle cues with accurate startSec/endSec.
 Then translate each cue to ${targetLanguage}.
 
@@ -103,13 +114,16 @@ Rules:
 - Source language hint: ${sourceLanguage}
 - Preserve tone, slang, punctuation, and emojis
 - Keep cues readable (1-2 lines when possible)
+- Max characters per subtitle line: ${Math.max(20, options.maxCharsPerLine)}
+- Speaker labels required: ${options.includeSpeakerLabels ? 'YES' : 'NO'}
+- Preserve filler words (uh/um/etc): ${options.preserveFillerWords ? 'YES' : 'NO'}
 - Return JSON only
 - If there is no speech, return one cue with "[No speech]"
 `;
 
   let lastError: Error | null = null;
 
-  for (const model of MODELS) {
+  for (const model of models) {
     try {
       onProgress?.(40);
       const response = await ai.models.generateContent({
@@ -165,10 +179,12 @@ Rules:
 export const translateSubtitleCues = async (
   cues: SubtitleCue[],
   targetLanguage: string,
-  sourceLanguage = 'Auto detect'
+  sourceLanguage = 'Auto detect',
+  aiProfile: SubtitleTranscriptionOptions['aiProfile'] = 'BALANCED'
 ): Promise<SubtitleCue[]> => {
   if (cues.length === 0) return cues;
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const models = PROFILE_MODELS[aiProfile] || PROFILE_MODELS.BALANCED;
 
   const input = cues.map(cue => ({ id: cue.id, text: cue.text }));
   const prompt = `Translate these subtitle cues into ${targetLanguage}.
@@ -179,7 +195,7 @@ Input:
 ${JSON.stringify(input)}
 `;
 
-  for (const model of MODELS) {
+  for (const model of models) {
     try {
       const response = await ai.models.generateContent({
         model,
@@ -237,6 +253,127 @@ export const subtitlesToVtt = (cues: SubtitleCue[], useTranslatedText = true): s
     const text = useTranslatedText ? (cue.translatedText || cue.text) : cue.text;
     return `${formatVttTime(cue.startSec)} --> ${formatVttTime(cue.endSec)}\n${text}`;
   }).join('\n\n')}`;
+
+export const subtitlesToCsv = (cues: SubtitleCue[], useTranslatedText = true): string => {
+  const lines = ['id,startSec,endSec,text'];
+  for (const cue of normalizeSubtitleCues(cues)) {
+    const text = (useTranslatedText ? (cue.translatedText || cue.text) : cue.text).replace(/"/g, '""');
+    lines.push(`${cue.id},${cue.startSec.toFixed(3)},${cue.endSec.toFixed(3)},"${text}"`);
+  }
+  return lines.join('\n');
+};
+
+const parseTimeToSeconds = (value: string): number => {
+  const normalized = value.trim().replace(',', '.');
+  const [hh = '0', mm = '0', ss = '0'] = normalized.split(':');
+  return Number(hh) * 3600 + Number(mm) * 60 + Number(ss);
+};
+
+export const parseSrt = (srtContent: string): SubtitleCue[] => {
+  const blocks = srtContent.replace(/\r/g, '').split('\n\n');
+  const cues: SubtitleCue[] = [];
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length < 2) continue;
+
+    const timeLineIndex = lines.findIndex(line => line.includes('-->'));
+    if (timeLineIndex === -1) continue;
+
+    const [startRaw, endRaw] = lines[timeLineIndex].split('-->').map(item => item.trim());
+    const text = lines.slice(timeLineIndex + 1).join('\n');
+    if (!text) continue;
+
+    cues.push({
+      id: `srt-${cues.length}-${Date.now()}`,
+      startSec: parseTimeToSeconds(startRaw),
+      endSec: parseTimeToSeconds(endRaw),
+      text,
+      translatedText: text
+    });
+  }
+
+  return normalizeSubtitleCues(cues);
+};
+
+export const parseVtt = (vttContent: string): SubtitleCue[] => {
+  const cleaned = vttContent.replace(/\r/g, '').replace(/^WEBVTT\s*/i, '');
+  const blocks = cleaned.split('\n\n');
+  const cues: SubtitleCue[] = [];
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+
+    const timeLine = lines.find(line => line.includes('-->'));
+    if (!timeLine) continue;
+
+    const [startRaw, endRaw] = timeLine.split('-->').map(item => item.trim());
+    const textStart = lines.findIndex(line => line.includes('-->')) + 1;
+    const text = lines.slice(textStart).join('\n');
+    if (!text) continue;
+
+    cues.push({
+      id: `vtt-${cues.length}-${Date.now()}`,
+      startSec: parseTimeToSeconds(startRaw),
+      endSec: parseTimeToSeconds(endRaw),
+      text,
+      translatedText: text
+    });
+  }
+
+  return normalizeSubtitleCues(cues);
+};
+
+export const analyzeSubtitleQuality = (cues: SubtitleCue[]): SubtitleQualityReport => {
+  const issues: SubtitleQualityIssue[] = [];
+  const sorted = normalizeSubtitleCues(cues);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const cue = sorted[i];
+    const duration = Math.max(0.01, cue.endSec - cue.startSec);
+    const text = cue.translatedText || cue.text;
+    const cps = text.replace(/\s+/g, '').length / duration;
+
+    if (duration < 0.8) {
+      issues.push({
+        cueId: cue.id,
+        severity: 'MEDIUM',
+        message: 'Cue duration is very short (<0.8s).'
+      });
+    }
+
+    if (cps > 21) {
+      issues.push({
+        cueId: cue.id,
+        severity: 'HIGH',
+        message: `Reading speed too fast (${cps.toFixed(1)} chars/sec).`
+      });
+    } else if (cps > 17) {
+      issues.push({
+        cueId: cue.id,
+        severity: 'MEDIUM',
+        message: `Reading speed is high (${cps.toFixed(1)} chars/sec).`
+      });
+    }
+
+    const next = sorted[i + 1];
+    if (next && cue.endSec > next.startSec) {
+      issues.push({
+        cueId: cue.id,
+        severity: 'HIGH',
+        message: `Overlaps with next cue by ${(cue.endSec - next.startSec).toFixed(2)}s.`
+      });
+    }
+  }
+
+  const high = issues.filter(item => item.severity === 'HIGH').length;
+  const medium = issues.filter(item => item.severity === 'MEDIUM').length;
+  const low = issues.filter(item => item.severity === 'LOW').length;
+  const score = Math.max(0, 100 - high * 15 - medium * 7 - low * 3);
+
+  return { score, issues };
+};
 
 export const downloadTextFile = (content: string, fileName: string, mimeType: string) => {
   const blob = new Blob([content], { type: mimeType });

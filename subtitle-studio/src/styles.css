@@ -330,6 +330,11 @@ textarea {
   font-size: 0.7rem;
 }
 
+.preset-row button.active {
+  border-color: #22d3ee;
+  color: #67e8f9;
+}
+
 .editor-header {
   display: flex;
   justify-content: space-between;
@@ -404,6 +409,89 @@ textarea {
   padding: 10px;
   font-size: 0.75rem;
   color: #9ca3af;
+}
+
+.queue-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.queue-item.active {
+  border-color: rgba(34, 211, 238, 0.6);
+  background: rgba(34, 211, 238, 0.09);
+}
+
+.queue-item-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px;
+  text-align: left;
+}
+
+.queue-item-main span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.queue-item-main small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.64rem;
+  color: #9ca3af;
+}
+
+.queue-remove {
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.quality {
+  margin: 0;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.72rem;
+}
+
+.quality-high {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #fecaca;
+}
+
+.quality-medium {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fde68a;
+}
+
+.quality-low {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #bbf7d0;
 }
 
 .spin {

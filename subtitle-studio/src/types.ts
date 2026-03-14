@@ -30,4 +30,33 @@ export interface SubtitleStyle {
 export interface SubtitleTranscriptionOptions {
   sourceLanguage: string;
   targetLanguage: string;
+  aiProfile: 'SPEED' | 'BALANCED' | 'MAX_QUALITY';
+  includeSpeakerLabels: boolean;
+  maxCharsPerLine: number;
+  preserveFillerWords: boolean;
+}
+
+export interface SubtitleQualityIssue {
+  cueId: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  message: string;
+}
+
+export interface SubtitleQualityReport {
+  score: number;
+  issues: SubtitleQualityIssue[];
+}
+
+export interface SubtitleProjectSnapshot {
+  sourceLanguage: string;
+  targetLanguage: string;
+  customTargetLanguage: string;
+  detectedLanguage: string;
+  style: SubtitleStyle;
+  displayMode: 'TRANSLATED' | 'ORIGINAL' | 'BILINGUAL';
+  cues: SubtitleCue[];
+  aiProfile: 'SPEED' | 'BALANCED' | 'MAX_QUALITY';
+  includeSpeakerLabels: boolean;
+  maxCharsPerLine: number;
+  preserveFillerWords: boolean;
 }
