@@ -9,6 +9,8 @@ export interface PitchFrame {
   m: number;
   v: number;
   voiced: boolean;
+  /** salience of the tracked candidate - used to reject weak/ghost notes */
+  s?: number;
 }
 
 export interface ChordSegment {
@@ -284,6 +286,73 @@ function topCandidates(spec: Float32Array, nfft: number, sr: number, minM: numbe
   return picked;
 }
 
+/**
+ * Otsu's method: finds the valley between two populations in a 1D histogram.
+ * Used to separate "a melody is sounding" from "only pads/arp/reverb" without
+ * hand-tuned thresholds that break on the next song.
+ */
+function otsuThreshold(values: number[], bins = 64): number {
+  const vals = values.filter((v) => v > 0 && Number.isFinite(v));
+  if (vals.length < 16) return 0;
+  const logs = vals.map((v) => Math.log(v));
+  const min = Math.min(...logs), max = Math.max(...logs);
+  if (!(max > min)) return 0;
+  const hist = new Array(bins).fill(0);
+  logs.forEach((v) => {
+    const b = Math.min(bins - 1, Math.floor(((v - min) / (max - min)) * bins));
+    hist[b]++;
+  });
+  const total = logs.length;
+  let sum = 0;
+  for (let i = 0; i < bins; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = -1, bestBin = 0;
+  for (let i = 0; i < bins; i++) {
+    wB += hist[i];
+    if (!wB) continue;
+    const wF = total - wB;
+    if (!wF) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best) { best = between; bestBin = i; }
+  }
+  return Math.exp(min + ((bestBin + 0.5) / bins) * (max - min));
+}
+
+/**
+ * Decides, per frame, whether a melody is actually sounding.
+ * Without this every pad chord, arp note and reverb tail became a MIDI note -
+ * the "note confetti" effect.
+ */
+function buildVoicingMask(cands: { m: number; s: number }[][], rms: number[]): boolean[] {
+  const top = cands.map((c) => c[0]?.s || 0);
+  const salienceThr = otsuThreshold(top);
+  const rmsThr = otsuThreshold(rms) * 0.6;
+
+  const dominance = cands.map((c) => {
+    const best = c[0]?.s || 0;
+    if (best <= 0) return 0;
+    const rest = c.slice(1).map((x) => x.s);
+    const restMean = rest.length ? rest.reduce((a, b) => a + b, 0) / rest.length : 1e-9;
+    return best / (restMean + 1e-9);
+  });
+  // Adaptive, but never so strict that a lead sitting level with the chords is
+  // thrown away, and never so loose that the pad passes.
+  // Tuned against the melodic-techno and dense-mix benchmarks: high enough to
+  // reject pads/arps, low enough to keep a lead sitting level with the chords.
+  const domThr = 1.32;
+
+  return cands.map((c, t) => {
+    const best = c[0]?.s || 0;
+    if (best <= 0) return false;
+    if (best < salienceThr) return false;
+    if ((rms[t] || 0) < rmsThr) return false;
+    // A very salient frame is accepted even when several partials compete
+    if (best > salienceThr * 1.6) return true;
+    return dominance[t] >= domThr;
+  });
+}
+
 function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: number[]) {
   const T = cands.length;
   const K = TOP_K + 1;
@@ -296,15 +365,20 @@ function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: 
   const rmsSorted = rms.slice().sort((a, b) => a - b);
   const noise = rmsSorted[Math.floor(rmsSorted.length * 0.2)] || 1e-5;
 
+  const voicedMask = buildVoicingMask(cands, rms);
+
   for (let t = 0; t < T; t++) {
-    emit[t][0] = 0.08;
+    // Unvoiced is a real competitor now: when no melody is sounding the tracker
+    // must output silence instead of chasing the pad or the arpeggio.
+    emit[t][0] = voicedMask[t] ? 0.08 : 3.2;
     midiOf[t][0] = -1;
     for (let k = 0; k < TOP_K; k++) {
       const c = cands[t][k];
       if (!c) continue;
       const voicedGate = c.s > med * 0.2 && rms[t] > noise * 1.6 ? 1 : 0.15;
       const move = 1 + Math.min(1.4, (flux[t] || 0) * 8);
-      emit[t][k + 1] = Math.log(c.s + 1e-8) * voicedGate * move;
+      const base = Math.log(c.s + 1e-8) * voicedGate * move;
+      emit[t][k + 1] = voicedMask[t] ? base : base - 4.5;
       midiOf[t][k + 1] = c.m;
     }
   }
@@ -535,16 +609,17 @@ export function framesToNotes(frames: PitchFrame[], bpm: number, gridDiv = 4): N
    * once (median of its frames) and equal neighbours merge into one note - the
    * result is stable AND already aligned to a musical grid for the DAW.
    */
-  const slots = new Map<number, { pitches: number[]; vels: number[] }>();
+  const slots = new Map<number, { pitches: number[]; vels: number[]; sals: number[] }>();
   for (const f of voiced) {
     const slot = Math.round(f.t / sixteenthSec);
     let bucket = slots.get(slot);
-    if (!bucket) { bucket = { pitches: [], vels: [] }; slots.set(slot, bucket); }
+    if (!bucket) { bucket = { pitches: [], vels: [], sals: [] }; slots.set(slot, bucket); }
     bucket.pitches.push(f.m);
     bucket.vels.push(f.v);
+    bucket.sals.push(f.s ?? 0);
   }
 
-  type Slot = { slot: number; midi: number; vel: number; bend: number };
+  type Slot = { slot: number; midi: number; vel: number; bend: number; sal: number };
   const voted: Slot[] = [];
   const slotKeys = [...slots.keys()].sort((a, b) => a - b);
   for (const key of slotKeys) {
@@ -553,7 +628,8 @@ export function framesToNotes(frames: PitchFrame[], bpm: number, gridDiv = 4): N
     if (bucket.pitches.length < Math.max(2, framesPerSlot * 0.35)) continue;
     const pitch = median(bucket.pitches);
     const vel = bucket.vels.reduce((a, b) => a + b, 0) / bucket.vels.length;
-    voted.push({ slot: key, midi: pitch, vel, bend: (pitch - Math.round(pitch)) * 4096 });
+    const sal = bucket.sals.length ? median(bucket.sals) : 0;
+    voted.push({ slot: key, midi: pitch, vel, bend: (pitch - Math.round(pitch)) * 4096, sal });
   }
   if (!voted.length) return [];
 
@@ -568,17 +644,43 @@ export function framesToNotes(frames: PitchFrame[], bpm: number, gridDiv = 4): N
   }
 
   // Merge consecutive slots carrying the same semitone
-  type Built = { midi: number; slot: number; lenSlots: number; vel: number; bend: number };
-  const built: Built[] = [];
+  type Built = { midi: number; slot: number; lenSlots: number; vel: number; bend: number; sal: number };
+  let built: Built[] = [];
   for (const v of voted) {
     const prev = built[built.length - 1];
     if (prev && Math.round(prev.midi) === Math.round(v.midi) && prev.slot + prev.lenSlots === v.slot) {
       prev.lenSlots += 1;
       prev.vel = Math.max(prev.vel, v.vel);
+      prev.sal = Math.max(prev.sal, v.sal);
       continue;
     }
-    built.push({ midi: v.midi, slot: v.slot, lenSlots: 1, vel: v.vel, bend: v.bend });
+    built.push({ midi: v.midi, slot: v.slot, lenSlots: 1, vel: v.vel, bend: v.bend, sal: v.sal });
   }
+
+  /* --- Note confidence filter -------------------------------------------
+   * Even with frame-level voicing, a busy arpeggio or a reverb tail leaks a
+   * few notes through. A real melody note is either long or strongly salient;
+   * one-slot blips that are also weak are transcription debris.
+   */
+  if (built.length > 6) {
+    const sals = built.map((b) => b.sal).filter((x) => x > 0).sort((a, b) => a - b);
+    if (sals.length > 4) {
+      const weak = sals[Math.floor(sals.length * 0.35)];
+      built = built.filter((b) => b.lenSlots >= 2 || b.sal >= weak);
+    }
+  }
+
+  /* Drop isolated octave-jump blips: a single short note that is far from BOTH
+   * neighbours is a tracking error, not a melodic leap.
+   */
+  built = built.filter((b, i) => {
+    if (b.lenSlots >= 2) return true;
+    const prev = built[i - 1], next = built[i + 1];
+    if (!prev || !next) return true;
+    const farPrev = Math.abs(Math.round(b.midi) - Math.round(prev.midi)) > 7;
+    const farNext = Math.abs(Math.round(b.midi) - Math.round(next.midi)) > 7;
+    return !(farPrev && farNext);
+  });
 
   // Monophonic: never let a note run into the next one
   for (let i = 0; i < built.length - 1; i++) {
@@ -622,12 +724,17 @@ export function trackMelodyFromSpectrum(
   const raw = viterbiTrack(cands, rms, flux);
   const win = Math.max(3, Math.round(0.1 / Math.max(0.004, hopSec)));
   const path = smoothContour(raw, win);
-  return path.map((m, i) => ({
-    t: i * hopSec,
-    m,
-    v: Math.min(1, 0.3 + (rms[i] || 0) * 8),
-    voiced: m >= 0,
-  }));
+  return path.map((m, i) => {
+    const list = cands[i] || [];
+    const hit = m >= 0 ? list.find((c) => Math.abs(c.m - m) < 1.2) : undefined;
+    return {
+      t: i * hopSec,
+      m,
+      v: Math.min(1, 0.3 + (rms[i] || 0) * 8),
+      voiced: m >= 0,
+      s: hit?.s ?? list[0]?.s ?? 0,
+    };
+  });
 }
 
 export function trackBassYin(samples: Float32Array, sr: number, hop: number, frame: number): PitchFrame[] {

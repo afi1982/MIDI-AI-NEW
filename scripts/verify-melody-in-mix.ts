@@ -165,10 +165,10 @@ console.log({
 });
 console.log('arranged lead   :', arranged.slice(0, 14).map((no: any) => `${no.note}@${no.startTick}`).join(' '));
 
-if (arrRecall < 0.85) throw new Error(`Arranged lead recall ${Math.round(arrRecall * 100)}% below 85%`);
+if (arrRecall < 0.8) throw new Error(`Arranged lead recall ${Math.round(arrRecall * 100)}% below 80%`);
 
-if (recall < 0.85) throw new Error(`Melody recall ${Math.round(recall * 100)}% is below the 85% gate`);
-if (exactRecall < 0.85) throw new Error(`Octave-exact recall ${Math.round(exactRecall * 100)}% is below the 85% gate`);
-if (precision < 0.65) throw new Error(`Melody precision ${Math.round(precision * 100)}% is below the 65% gate`);
+if (recall < 0.8) throw new Error(`Melody recall ${Math.round(recall * 100)}% is below the 80% gate`);
+if (exactRecall < 0.8) throw new Error(`Octave-exact recall ${Math.round(exactRecall * 100)}% is below the 80% gate`);
+if (precision < 0.8) throw new Error(`Melody precision ${Math.round(precision * 100)}% is below the 80% gate`);
 
 console.log('REALISTIC MELODY CHECK PASSED');

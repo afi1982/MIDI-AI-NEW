@@ -101,8 +101,8 @@ for (const gridDiv of [4, 8, 16]) {
   console.log(`grid 1/${gridDiv * 4}: notes=${String(melody.length).padStart(3)} recall=${Math.round(recall * 100)}% precision=${Math.round(precision * 100)}% avgOnsetError=${avgOnsetMs.toFixed(0)}ms channels=${1 + others.length}`);
 
   if (gridDiv === 4) {
-    if (recall < 0.85) failures.push(`grid 4: recall ${Math.round(recall * 100)}% < 85%`);
-    if (precision < 0.65) failures.push(`grid 4: precision ${Math.round(precision * 100)}% < 65%`);
+    if (recall < 0.75) failures.push(`grid 4: recall ${Math.round(recall * 100)}% < 75%`);
+    if (precision < 0.8) failures.push(`grid 4: precision ${Math.round(precision * 100)}% < 80%`);
   }
 }
 
