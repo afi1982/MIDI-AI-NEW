@@ -11,6 +11,15 @@ export interface PitchFrame {
   voiced: boolean;
 }
 
+export interface ChordSegment {
+  startSec: number;
+  endSec: number;
+  root: number;      // pitch class 0-11
+  isMinor: boolean;
+  tones: number[];   // absolute midi notes of the voicing
+  strength: number;
+}
+
 export interface AudioStemAnalysis {
   bpm: number;
   sourceBpm?: number;
@@ -21,8 +30,12 @@ export interface AudioStemAnalysis {
   harmony: NoteEvent[];
   kickHits: number[];
   hatHits: number[];
+  openHatHits: number[];
   snareHits: number[];
+  clapHits: number[];
+  percHits: number[];
   bassNotes: NoteEvent[];
+  chords: ChordSegment[];
   kickMask: number[];
   detected: Partial<Record<string, number>>;
 }
@@ -385,6 +398,27 @@ function peakTimes(values: number[], hop: number, sr: number, threshRatio: numbe
   return times;
 }
 
+/**
+ * Onset picking against a LOCAL median instead of the global mean, so a busy
+ * section does not swallow hits (and a quiet intro does not invent them).
+ */
+function sharpPeaks(env: number[], hop: number, sr: number, ratio: number, minGap: number) {
+  const times: number[] = [];
+  const win = Math.max(8, Math.round((0.75 * sr) / hop));
+  for (let i = 2; i < env.length - 2; i++) {
+    const lo = Math.max(0, i - win), hi = Math.min(env.length, i + win);
+    const local = env.slice(lo, hi).filter((v) => v > 0).sort((a, b) => a - b);
+    const med = local.length ? local[Math.floor(local.length / 2)] : 0;
+    const prev = env[Math.max(0, i - Math.round((0.04 * sr) / hop))] || 1e-9;
+    const isPeak = env[i] >= env[i - 1] && env[i] >= env[i + 1];
+    if (isPeak && env[i] > med * ratio && env[i] > prev * 1.2) {
+      const t = (i * hop) / sr;
+      if (!times.length || t - times[times.length - 1] > minGap) times.push(t);
+    }
+  }
+  return times;
+}
+
 function estimateBpm(flux: number[], hop: number, sr: number) {
   const hopSec = hop / sr;
   const scores: { bpm: number; s: number }[] = [];
@@ -532,6 +566,292 @@ async function yieldUi() {
   await new Promise((r) => setTimeout(r, 0));
 }
 
+
+/* ---------------------------------------------------------------------------
+ * MULTI-CHANNEL SEPARATION HELPERS
+ * The first engine only produced kick / snare / hat / bass / lead. These add
+ * real timbre classification (clap vs snare, open vs closed hat, percussion)
+ * and harmonic chord extraction so a normal song lands on many channels.
+ * ------------------------------------------------------------------------ */
+
+function bandpass(x: Float32Array, sr: number, lo: number, hi: number) {
+  return rbjLowpass(rbjHighpass(x, sr, lo), sr, hi);
+}
+
+/** RMS envelope, one value per hop. */
+function rmsEnvelope(samples: Float32Array, hop: number) {
+  const env: number[] = [];
+  for (let i = 0; i + hop < samples.length; i += hop) {
+    let e = 0;
+    for (let j = 0; j < hop; j++) e += samples[i + j] * samples[i + j];
+    env.push(Math.sqrt(e / hop));
+  }
+  return env;
+}
+
+const envAt = (env: number[], sec: number, hop: number, sr: number) => {
+  const i = Math.round((sec * sr) / hop);
+  return env[Math.max(0, Math.min(env.length - 1, i))] || 0;
+};
+
+/**
+ * Energy ADDED by the transient in this band (peak minus the level 45ms before).
+ * Absolute band levels are useless in a dense mix - a sustaining bass line keeps
+ * the shell band lit permanently, which made every clap look like a snare.
+ */
+const envDelta = (env: number[], sec: number, hop: number, sr: number) => {
+  const i = Math.round((sec * sr) / hop);
+  if (i < 1 || i >= env.length) return 0;
+  const back = Math.max(0, i - Math.round((0.045 * sr) / hop));
+  const peak = Math.max(env[i] || 0, env[i + 1] || 0, env[i + 2] || 0);
+  return Math.max(0, peak - (env[back] || 0));
+};
+
+/** Peak-relative decay length in seconds (how long the band stays above 40%). */
+function decayLength(env: number[], sec: number, hop: number, sr: number) {
+  const start = Math.max(0, Math.round((sec * sr) / hop));
+  const peak = Math.max(env[start] || 0, env[start + 1] || 0);
+  if (peak <= 0) return 0;
+  let i = start;
+  const limit = Math.min(env.length - 1, start + 40);
+  while (i < limit && env[i] > peak * 0.4) i++;
+  return ((i - start) * hop) / sr;
+}
+
+export interface DrumClassification {
+  kick: number[];
+  snare: number[];
+  clap: number[];
+  hatClosed: number[];
+  hatOpen: number[];
+  perc: number[];
+}
+
+/**
+ * Classifies raw transients into drum families using band ratios + decay time.
+ *  - hats: high band dominates. Closed = short decay, open = long ringing decay.
+ *  - clap: broadband 1.5-4k noise burst with almost no 150-400Hz body.
+ *  - snare: noise burst WITH low-mid body.
+ *  - perc: everything else with 400-1600Hz energy (toms, congas, rides, fx).
+ */
+/**
+ * True percussion has a sharp rise and a fast decay. Sustained synth/vocal
+ * onsets do not - without this gate every lead note was counted as a snare.
+ */
+function isPercussive(env: number[], sec: number, hop: number, sr: number, riseRatio = 1.9, maxDecay = 0.4) {
+  const i = Math.round((sec * sr) / hop);
+  if (i < 2 || i >= env.length) return false;
+  const back = Math.max(0, i - Math.round((0.05 * sr) / hop));
+  const before = Math.max(1e-9, env[back]);
+  const peak = Math.max(env[i], env[i + 1] || 0);
+  if (peak / before < riseRatio) return false;
+  return decayLength(env, sec, hop, sr) <= maxDecay;
+}
+
+function classifyTransients(
+  candidates: number[],
+  envs: { body: number[]; noise: number[]; perc: number[]; high: number[]; low: number[] },
+  hop: number,
+  sr: number,
+  kickHits: number[],
+  flatness?: { noise: number[]; high: number[]; hopSec: number }
+): DrumClassification {
+  const flatAt = (arr: number[] | undefined, sec: number) => {
+    if (!arr || !arr.length || !flatness) return 1;
+    const i = Math.round(sec / flatness.hopSec);
+    return arr[Math.max(0, Math.min(arr.length - 1, i))] ?? 1;
+  };
+  const out: DrumClassification = { kick: kickHits, snare: [], clap: [], hatClosed: [], hatOpen: [], perc: [] };
+  const isNearKick = (t: number) => kickHits.some((k) => Math.abs(k - t) < 0.035);
+
+  const norm = (env: number[]) => {
+    const sorted = [...env].filter((v) => v > 0).sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.floor(sorted.length * 0.9)] || 1 : 1;
+  };
+  const nBody = norm(envs.body), nNoise = norm(envs.noise), nPerc = norm(envs.perc), nHigh = norm(envs.high);
+
+  for (const t of candidates) {
+    const body = envDelta(envs.body, t, hop, sr) / nBody;
+    const noise = envDelta(envs.noise, t, hop, sr) / nNoise;
+    const perc = envDelta(envs.perc, t, hop, sr) / nPerc;
+    const high = envDelta(envs.high, t, hop, sr) / nHigh;
+
+    // Skip transients that are just the kick bleeding into other bands
+    if (isNearKick(t) && high < 0.55 && noise < 0.5) continue;
+
+    // Hats: high band dominates and the burst is genuinely percussive
+    const noiseFlat = flatAt(flatness?.noise, t);
+    const highFlat = flatAt(flatness?.high, t);
+
+    if (high > 0.18 && high >= noise * 0.8 && high >= body * 0.8 && highFlat > 0.12 && isPercussive(envs.high, t, hop, sr, 1.7, 0.5)) {
+      const decay = decayLength(envs.high, t, hop, sr);
+      (decay > 0.11 ? out.hatOpen : out.hatClosed).push(t);
+      continue;
+    }
+
+    // Snare/clap vs tuned percussion: compare the noise+shell signature against
+    // the tonal 420-1600Hz body of toms/congas.
+    const snareScore = noise * 1.15 + body * 0.7;
+    const percScore = perc * 1.1;
+    // A broadband noise burst is mandatory - tonal chord/bass attacks also rise
+    // sharply in the shell band, and used to be mislabelled as snares.
+    const noisePercussive = isPercussive(envs.noise, t, hop, sr, 1.7, 0.35);
+
+    if (snareScore >= percScore * 0.85 && noise > 0.15 && noiseFlat > 0.12 && noisePercussive) {
+      // clap = noise burst without shell body, snare = noise burst with body
+      if (body < noise * 0.55) out.clap.push(t);
+      else out.snare.push(t);
+      continue;
+    }
+
+    if (perc > 0.15 && isPercussive(envs.perc, t, hop, sr, 1.9, 0.4)) { out.perc.push(t); continue; }
+
+    // Tuned percussion (toms, congas) - strong low-mid body, no noise burst,
+    // but still decays fast (a sustaining bass note does not).
+    if (body > 0.2 && noise < body * 0.6 && isPercussive(envs.body, t, hop, sr, 2.0, 0.3)) { out.perc.push(t); continue; }
+  }
+
+  // Collapse double-triggers inside each family (one hit per 60ms)
+  const tighten = (xs: number[]) => {
+    const sorted = [...xs].sort((a, b) => a - b);
+    const kept: number[] = [];
+    for (const t of sorted) if (!kept.length || t - kept[kept.length - 1] > 0.06) kept.push(t);
+    return kept;
+  };
+  out.snare = tighten(out.snare);
+  out.clap = tighten(out.clap);
+  out.hatClosed = tighten(out.hatClosed);
+  out.hatOpen = tighten(out.hatOpen);
+  out.perc = tighten(out.perc);
+  return out;
+}
+
+/**
+ * Spectral flatness inside a band: ~1.0 for noise (drums), near 0 for a tonal
+ * harmonic stack (synth/vocal). This is what separates a snare hit from the
+ * attack transient of a chord.
+ */
+function bandFlatness(mag: Float32Array, nfft: number, sr: number, lo: number, hi: number) {
+  const binHz = sr / nfft;
+  const b0 = Math.max(1, Math.floor(lo / binHz));
+  const b1 = Math.min(mag.length - 1, Math.ceil(hi / binHz));
+  if (b1 <= b0) return 0;
+  let logSum = 0, sum = 0;
+  for (let b = b0; b <= b1; b++) {
+    const v = mag[b] + 1e-9;
+    logSum += Math.log(v);
+    sum += v;
+  }
+  const count = b1 - b0 + 1;
+  const geo = Math.exp(logSum / count);
+  const arith = sum / count;
+  return arith > 0 ? geo / arith : 0;
+}
+
+const CHORD_MIN = 130;
+const CHORD_MAX = 2200;
+
+/** Per-frame 12-bin chroma restricted to the harmonic region of the mix. */
+function chromaFromSpectrum(mag: Float32Array, nfft: number, sr: number) {
+  const chroma = new Float32Array(12);
+  const binHz = sr / nfft;
+  const startBin = Math.max(1, Math.floor(CHORD_MIN / binHz));
+  const endBin = Math.min(mag.length - 1, Math.ceil(CHORD_MAX / binHz));
+  for (let b = startBin; b <= endBin; b++) {
+    const hz = b * binHz;
+    const midi = hzToMidi(hz);
+    if (!Number.isFinite(midi)) continue;
+    const pc = ((Math.round(midi) % 12) + 12) % 12;
+    chroma[pc] += mag[b];
+  }
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += chroma[i];
+  if (sum > 0) for (let i = 0; i < 12; i++) chroma[i] /= sum;
+  return chroma;
+}
+
+/**
+ * Segments the song into 2-beat windows, matches each against major/minor
+ * triad templates and merges repeats into sustained chord events.
+ */
+function detectChords(chromaFrames: Float32Array[], hopSec: number, bpm: number): ChordSegment[] {
+  if (!chromaFrames.length) return [];
+  const beatSec = 60 / bpm;
+  const winSec = beatSec * 2;
+  const framesPerWin = Math.max(4, Math.round(winSec / hopSec));
+  const raw: { start: number; end: number; root: number; isMinor: boolean; strength: number }[] = [];
+
+  for (let i = 0; i + framesPerWin <= chromaFrames.length; i += framesPerWin) {
+    const acc = new Float32Array(12);
+    for (let f = i; f < i + framesPerWin; f++) {
+      const fr = chromaFrames[f];
+      for (let c = 0; c < 12; c++) acc[c] += fr[c];
+    }
+    let total = 0;
+    for (let c = 0; c < 12; c++) total += acc[c];
+    if (total <= 0) continue;
+    for (let c = 0; c < 12; c++) acc[c] /= total;
+
+    let best = { root: -1, isMinor: true, score: -Infinity };
+    for (let root = 0; root < 12; root++) {
+      for (const isMinor of [true, false]) {
+        const third = (root + (isMinor ? 3 : 4)) % 12;
+        const fifth = (root + 7) % 12;
+        const inChord = acc[root] * 1.25 + acc[third] + acc[fifth];
+        let outChord = 0;
+        for (let c = 0; c < 12; c++) if (c !== root && c !== third && c !== fifth) outChord += acc[c];
+        const score = inChord - outChord * 0.35;
+        if (score > best.score) best = { root, isMinor, score };
+      }
+    }
+    if (best.root < 0 || best.score < 0.18) continue;
+    raw.push({ start: i * hopSec, end: (i + framesPerWin) * hopSec, root: best.root, isMinor: best.isMinor, strength: best.score });
+  }
+
+  // Merge consecutive identical chords
+  const merged: ChordSegment[] = [];
+  for (const seg of raw) {
+    const last = merged[merged.length - 1];
+    if (last && last.root === seg.root && last.isMinor === seg.isMinor && Math.abs(last.endSec - seg.start) < 0.05) {
+      last.endSec = seg.end;
+      last.strength = Math.max(last.strength, seg.strength);
+      continue;
+    }
+    const rootMidi = 48 + seg.root;
+    const tones = [rootMidi, rootMidi + (seg.isMinor ? 3 : 4), rootMidi + 7];
+    merged.push({ startSec: seg.start, endSec: seg.end, root: seg.root, isMinor: seg.isMinor, tones, strength: seg.strength });
+  }
+  return merged;
+}
+
+/**
+ * Pulls dense runs of short notes out of a melodic line - those are arpeggios,
+ * not a lead melody, and belong on their own channel.
+ */
+function splitArpFromLead(notes: NoteEvent[]): { lead: NoteEvent[]; arp: NoteEvent[] } {
+  if (notes.length < 8) return { lead: notes, arp: [] };
+  const sorted = [...notes].sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+  const arp: NoteEvent[] = [];
+  const lead: NoteEvent[] = [];
+  let run: NoteEvent[] = [];
+
+  const flush = () => {
+    if (run.length >= 6) arp.push(...run); else lead.push(...run);
+    run = [];
+  };
+
+  for (let i = 0; i < sorted.length; i++) {
+    const n = sorted[i];
+    const prev = run[run.length - 1];
+    const short = (n.durationTicks || 0) <= 200;
+    const tight = !prev || ((n.startTick || 0) - (prev.startTick || 0)) <= 260;
+    if (short && tight) run.push(n);
+    else { flush(); if (short) run.push(n); else lead.push(n); }
+  }
+  flush();
+  return { lead, arp };
+}
+
 export async function analyzeBufferToStems(
   raw: Float32Array,
   sampleRate: number,
@@ -560,6 +880,9 @@ export async function analyzeBufferToStems(
   const rmsArr: number[] = [];
   const fluxArr: number[] = [];
   const lowEnergy: number[] = [];
+  const chromaFrames: Float32Array[] = [];
+  const noiseFlatness: number[] = [];
+  const highFlatness: number[] = [];
   let prevSpec: Float32Array | null = null;
   const avgSpec = new Float32Array(nfft / 2);
   let avgReady = false;
@@ -589,6 +912,9 @@ export async function analyzeBufferToStems(
       const fg = Math.max(0, mag[b] - avgSpec[b] * 0.9);
       mixed[b] = fg + 0.28 * mag[b];
     }
+    chromaFrames.push(chromaFromSpectrum(mag, nfft, sr));
+    noiseFlatness.push(bandFlatness(mag, nfft, sr, 1500, 4200));
+    highFlatness.push(bandFlatness(mag, nfft, sr, 6000, 10000));
     const spec = whiten(mixed);
     const top = topCandidates(spec, nfft, sr, LEAD_MIN, LEAD_MAX, TOP_K);
     cands.push(top);
@@ -643,12 +969,46 @@ export async function analyzeBufferToStems(
     return ev(m, n.startTick || 0, Math.min(480, n.durationTicks || 120), 0.88);
   });
 
-  const kickHits = peakTimes(lowEnergy, hop, sr, 1.55, 0.12);
-  const highFlux = simpleFlux(high, 256);
-  const hatHits = peakTimes(highFlux, 256, sr, 1.25, 0.05);
-  const midFlux = simpleFlux(midBand, 256);
-  const snareHits = peakTimes(midFlux, 256, sr, 1.7, 0.18);
+  const kickEnv = rmsEnvelope(low, hop);
+  let kickHits = sharpPeaks(kickEnv, hop, sr, 1.35, 0.1);
+  if (kickHits.length < 4) kickHits = peakTimes(lowEnergy, hop, sr, 1.55, 0.12);
+
+  // --- Multi-channel drum separation -------------------------------------
+  const DHOP = 256;
+  const bodyBand = bandpass(mono, sr, 150, 420);     // snare shell / tom body
+  const noiseBand = bandpass(mono, sr, 1500, 4200);  // clap & snare noise burst
+  const percBand = bandpass(mono, sr, 420, 1600);    // toms, congas, fx perc
+  const envs = {
+    body: rmsEnvelope(bodyBand, DHOP),
+    noise: rmsEnvelope(noiseBand, DHOP),
+    perc: rmsEnvelope(percBand, DHOP),
+    high: rmsEnvelope(high, DHOP),
+    low: rmsEnvelope(low, DHOP),
+  };
+
+  const highFlux = simpleFlux(high, DHOP);
+  const midFlux = simpleFlux(midBand, DHOP);
+  const percFlux = simpleFlux(percBand, DHOP);
+  const candidateHits = Array.from(new Set([
+    ...peakTimes(highFlux, DHOP, sr, 1.25, 0.045),
+    ...peakTimes(midFlux, DHOP, sr, 1.5, 0.06),
+    ...peakTimes(percFlux, DHOP, sr, 1.6, 0.07),
+  ].map((t) => Math.round(t * 1000) / 1000))).sort((a, b) => a - b);
+
+  const drums = classifyTransients(candidateHits, envs, DHOP, sr, kickHits, {
+    noise: noiseFlatness,
+    high: highFlatness,
+    hopSec,
+  });
+  const hatHits = drums.hatClosed;
+  const openHatHits = drums.hatOpen;
+  const snareHits = drums.snare;
+  const clapHits = drums.clap;
+  const percHits = drums.perc;
   const kickMask = buildKickMask(kickHits, detectedBpm);
+
+  // --- Harmony / chord extraction ----------------------------------------
+  const chords = detectChords(chromaFrames, hopSec, detectedBpm);
 
   const hist = new Array(12).fill(0);
   melodyFrames.forEach((p) => {
@@ -670,8 +1030,12 @@ export async function analyzeBufferToStems(
     harmony,
     kickHits,
     hatHits,
+    openHatHits,
     snareHits,
+    clapHits,
+    percHits,
     bassNotes,
+    chords,
     kickMask,
     detected: {
       ch1_kick: kickHits.length,
@@ -679,7 +1043,11 @@ export async function analyzeBufferToStems(
       ch4_leadA: lead.length,
       ch5_leadB: harmony.length,
       ch8_snare: snareHits.length,
+      ch9_clap: clapHits.length,
+      ch10_percLoop: percHits.length,
       ch12_hhClosed: hatHits.length,
+      ch13_hhOpen: openHatHits.length,
+      ch16_synth: chords.length,
     },
   };
 }
@@ -751,7 +1119,17 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   );
 
   const lastTick = totalBars * 1920;
-  groove.ch4_leadA = analysis.lead.map((n) => place(n, 0.08)).filter((n) => (n.startTick || 0) < lastTick);
+
+  // Lead: pull dense 16th runs out to the arp channel so the lead stays a melody
+  const leadPlaced = analysis.lead.map((n) => place(n, 0.08)).filter((n) => (n.startTick || 0) < lastTick);
+  const { lead: leadOnly, arp: arpNotes } = splitArpFromLead(leadPlaced);
+  groove.ch4_leadA = leadOnly;
+  groove.ch6_arpA = arpNotes.map((n) => ev(
+    theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note),
+    n.startTick || 0,
+    Math.min(160, n.durationTicks || 120),
+    Math.min(1, (n.velocity || 0.7))
+  ));
   groove.ch5_leadB = (analysis.harmony || []).map((n) => place(n)).filter((n) => (n.startTick || 0) < lastTick);
   groove.ch2_sub = analysis.bassNotes.map((n) => place(n)).filter((n) => (n.startTick || 0) < lastTick);
   groove.ch3_midBass = groove.ch2_sub
@@ -774,20 +1152,55 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     }
   }
 
-  (analysis.snareHits || []).forEach((sec) => {
-    const tick = Math.round(sec * bpm * 480 / 60);
-    if (tick < lastTick) groove.ch8_snare.push(ev(38, tick, 80, 0.78));
+  const placeHits = (hits: number[] | undefined, channel: string, midi: number, dur: number, vel: number) => {
+    (hits || []).forEach((sec) => {
+      const tick = Math.round(sec * bpm * 480 / 60);
+      if (tick < lastTick) groove[channel].push(ev(midi, tick, dur, vel));
+    });
+  };
+
+  placeHits(analysis.snareHits, 'ch8_snare', 38, 80, 0.78);
+  placeHits(analysis.clapHits, 'ch9_clap', 39, 90, 0.72);
+  placeHits(analysis.percHits, 'ch10_percLoop', 45, 70, 0.6);
+  placeHits(analysis.hatHits, 'ch12_hhClosed', 42, 36, 0.52);
+  placeHits(analysis.openHatHits, 'ch13_hhOpen', 46, 180, 0.55);
+
+  // --- Chords & pads come from real harmonic analysis, not copies of the lead
+  const chords = analysis.chords || [];
+  chords.forEach((c) => {
+    const startTick = Math.round(c.startSec * bpm * 480 / 60);
+    const durTicks = Math.max(240, Math.round((c.endSec - c.startSec) * bpm * 480 / 60));
+    if (startTick >= lastTick) return;
+    c.tones.forEach((m, i) => {
+      // Chord stab on the synth channel (all tones share the same tick = real chord)
+      groove.ch16_synth.push(ev(m + 12, startTick, Math.min(durTicks, 480), 0.5 - i * 0.04));
+      // Sustained pad voicing an octave lower
+      groove.ch15_pad.push(ev(m, startTick, durTicks, 0.3 - i * 0.03));
+    });
   });
 
-  analysis.hatHits.forEach((sec) => {
-    const tick = Math.round(sec * bpm * 480 / 60);
-    if (tick < lastTick) groove.ch12_hhClosed.push(ev(42, tick, 36, 0.52));
-  });
+  // Fallback: if no chord was confidently detected keep the old long-note pad
+  if (!groove.ch15_pad.length) {
+    const longPads = [...groove.ch5_leadB, ...groove.ch4_leadA.filter((n: NoteEvent) => (n.durationTicks || 0) >= 720)].slice(0, 100);
+    groove.ch15_pad = longPads.map((n: NoteEvent) => {
+      const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+      return ev(m > 70 ? m - 12 : m, n.startTick || 0, Math.max(480, n.durationTicks || 480), 0.26);
+    });
+  }
 
-  const longPads = [...groove.ch5_leadB, ...groove.ch4_leadA.filter((n: NoteEvent) => (n.durationTicks || 0) >= 720)].slice(0, 100);
-  groove.ch15_pad = longPads.map((n: NoteEvent) => {
-    const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-    return ev(m > 70 ? m - 12 : m, n.startTick || 0, Math.max(480, n.durationTicks || 480), 0.26);
+  // Sort every channel and drop stacked duplicates
+  ELITE_16_CHANNELS.forEach((ch) => {
+    const list = (groove[ch] || []) as NoteEvent[];
+    if (!list.length) return;
+    const seen = new Set<string>();
+    groove[ch] = list
+      .sort((a, b) => (a.startTick || 0) - (b.startTick || 0))
+      .filter((n) => {
+        const k = `${n.startTick}-${Array.isArray(n.note) ? n.note[0] : n.note}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
   });
 
   groove.analysisMeta = {
@@ -796,8 +1209,14 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     detectedKey: `${analysis.key} ${analysis.scale}`,
     usedKey: `${key} ${scale}`,
     durationSec: analysis.durationSec,
-    channels: analysis.detected,
-    mode: '1:1 transcription',
+    channels: ELITE_16_CHANNELS.reduce((acc: Record<string, number>, ch) => {
+      const count = (groove[ch] || []).length;
+      if (count) acc[ch] = count;
+      return acc;
+    }, {}),
+    detectedStems: analysis.detected,
+    chordsFound: (analysis.chords || []).length,
+    mode: 'multi-channel transcription',
   };
   return groove as GrooveObject;
 }

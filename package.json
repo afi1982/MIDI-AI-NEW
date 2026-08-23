@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "build:docs": "vite build --outDir docs --emptyOutDir",
+    "verify:channels": "esbuild scripts/verify-channel-separation.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-channels.mjs --log-level=error && node node_modules/.cache/verify-channels.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
