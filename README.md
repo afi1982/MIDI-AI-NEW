@@ -20,6 +20,16 @@ View your app in AI Studio: https://ai.studio/apps/83ac666f-22b9-4cbe-b476-dcaf4
 
 The Vite server binds to `0.0.0.0:5173` and allows preview hosts, so the UI loads in local and sandboxed environments. The app still boots without an API key; AI generation calls will fail until one is set.
 
+## Open on your phone
+
+Public URL (open this on the phone, then Add to Home Screen):
+
+https://cdn.jsdelivr.net/gh/afi1982/MIDI-AI-NEW@a45cfab/docs/index.html
+
+For a shorter permanent address, enable GitHub Pages:
+Settings → Pages → Deploy from branch `arena/01a02d3b-midi-ai-new` / folder `/docs`
+then use `https://afi1982.github.io/MIDI-AI-NEW/`
+
 ## Install as a mobile app
 
 MIDI AI is a Progressive Web App. On a phone it runs full-screen with a bottom tab bar and can be added to the home screen.
