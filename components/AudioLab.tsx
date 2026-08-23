@@ -106,6 +106,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
     const [pickError, setPickError] = useState<string | null>(null);
     const [genre, setGenre] = useState<MusicGenre>(MusicGenre.PSYTRANCE_FULLON);
     const [mode, setMode] = useState<'MELODY_1_1' | 'FULL_BAND'>('MELODY_1_1');
+    const [engine, setEngine] = useState<'DSP' | 'AI'>('DSP');
     const [gridDiv, setGridDiv] = useState<number>(4);
     const [snapToKey, setSnapToKey] = useState(false);
     const [keyName, setKeyName] = useState<string>('AUTO');
@@ -143,8 +144,9 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
             mode,
             gridDiv,
             snapToKey,
+            engine,
         }));
-    }, [autoBpm, manualBpm, genre, keyName, scaleName, mode, gridDiv, snapToKey]);
+    }, [autoBpm, manualBpm, genre, keyName, scaleName, mode, gridDiv, snapToKey, engine]);
 
     const onDrop = useCallback((files: File[]) => {
         if (files.length === 0) return;
@@ -257,6 +259,22 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                     <span className="block text-[9px] font-bold opacity-70 mt-1">תופים, בס, אקורדים — 12 ערוצים</span>
                                 </button>
                             </div>
+                            {mode === 'MELODY_1_1' && (
+                                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
+                                    <span className="text-[9px] font-black text-gray-500 uppercase">מנוע</span>
+                                    <button
+                                        onClick={() => setEngine('DSP')}
+                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${engine === 'DSP' ? 'bg-white text-black' : 'bg-white/5 text-gray-400'}`}
+                                    >מקומי (מהיר)</button>
+                                    <button
+                                        onClick={() => setEngine('AI')}
+                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${engine === 'AI' ? 'bg-emerald-500 text-black' : 'bg-white/5 text-gray-400'}`}
+                                    >AI (איטי, מדויק יותר)</button>
+                                    <p className="w-full text-[10px] text-gray-400 leading-relaxed">
+                                        מנוע AI מאזין לשיר בקטעים ומתמלל את המלודיה. דורש GEMINI_API_KEY; אם משהו נכשל — המנוע המקומי משלים אוטומטית.
+                                    </p>
+                                </div>
+                            )}
                             {mode === 'MELODY_1_1' && (
                                 <div className="flex flex-wrap items-center gap-2 pt-1">
                                     <span className="text-[9px] font-black text-gray-500 uppercase">תזמון</span>

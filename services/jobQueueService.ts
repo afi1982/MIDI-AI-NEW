@@ -8,6 +8,8 @@ import { midiRendererService, RenderProfile } from './midiRendererService';
 import { inspectAndHealGroove, inspectAudioBlob, QualityReport } from './qualityGateService';
 import { describeAudioPickError } from './audioFilePicker';
 import { analyzeSongToStems, arrangeTranceFromAnalysis, arrangeMelodyOnly, decodeIfAudio } from './audioStemService';
+import { transcribeMelodyWithAI, hasAiKey } from './melodyAiService';
+import { theoryEngine } from './theoryEngine';
 
 export type JobType = 'MIDI_GENERATION' | 'AUDIO_REGRESSION' | 'FORENSIC_ANALYSIS' | 'FORENSIC_STUDY' | 'MELODY_ARCHITECT' | 'MIDI_RENDER';
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -41,7 +43,7 @@ class JobQueueService {
         return [...this.jobs];
     }
 
-    public addAudioJob(file: File, overrideBpm?: number, extras?: { genre?: MusicGenre | string; key?: string; scale?: string; mode?: 'MELODY_1_1' | 'FULL_BAND'; gridDiv?: number; snapToKey?: boolean }) {
+    public addAudioJob(file: File, overrideBpm?: number, extras?: { genre?: MusicGenre | string; key?: string; scale?: string; mode?: 'MELODY_1_1' | 'FULL_BAND'; gridDiv?: number; snapToKey?: boolean; engine?: 'DSP' | 'AI' }) {
         const pickError = describeAudioPickError(file);
         if (pickError) {
             throw new Error(pickError);
@@ -193,6 +195,44 @@ class JobQueueService {
 
         const trackName = file.name.replace(/\.[^.]+$/, '');
         const melodyOnly = (job.payload.mode || 'MELODY_1_1') === 'MELODY_1_1';
+
+        // --- AI melody engine (optional, falls back to the DSP transcription) ---
+        let aiNotes: any[] | null = null;
+        if (melodyOnly && job.payload.engine === 'AI') {
+            if (!hasAiKey()) {
+                job.error = 'AI engine needs a GEMINI_API_KEY — used the local engine instead.';
+                console.warn('[AudioJob] no API key, falling back to DSP melody');
+            } else {
+                try {
+                    const dspNotes = analysis.lead || [];
+                    const midis = dspNotes.map((n: any) => theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note)).sort((a, b) => a - b);
+                    const medianMidi = midis.length ? midis[Math.floor(midis.length / 2)] : undefined;
+                    const res = await transcribeMelodyWithAI(file, {
+                        bpm: job.payload.overrideBpm || analysis.bpm,
+                        fallbackNotes: dspNotes,
+                        medianMidi,
+                        onProgress: (p) => { job.progress = 40 + Math.round(p * 0.5); this.notify(); },
+                    });
+                    if (res.notes.length >= 4) {
+                        aiNotes = res.notes;
+                        job.error = res.chunksFromFallback
+                            ? `AI transcribed ${res.chunksFromAi}/${res.chunksTotal} sections (rest from the local engine).`
+                            : undefined;
+                    } else {
+                        job.error = 'AI returned no usable melody — used the local engine.';
+                    }
+                } catch (err: any) {
+                    const code = err?.message === 'AI_KEY_INVALID' ? 'API key rejected' : (err?.message || 'AI engine failed');
+                    job.error = `${code} — used the local engine instead.`;
+                    console.warn('[AudioJob] AI melody failed, falling back', err);
+                }
+            }
+        }
+
+        if (aiNotes) {
+            (analysis as any).lead = aiNotes;
+            (analysis as any).leadFrames = undefined; // keep the AI notes verbatim
+        }
 
         const groove = melodyOnly
             ? arrangeMelodyOnly(analysis, {

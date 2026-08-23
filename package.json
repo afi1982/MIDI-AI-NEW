@@ -14,7 +14,9 @@
     "verify:midi": "esbuild scripts/verify-midi-loader.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-midi.mjs --log-level=error && node node_modules/.cache/verify-midi.mjs",
     "verify:melody-only": "esbuild scripts/verify-melody-only.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-melody-only.mjs --log-level=error && node node_modules/.cache/verify-melody-only.mjs",
     "verify:techno": "esbuild scripts/verify-melodic-techno.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-techno.mjs --log-level=error && node node_modules/.cache/verify-techno.mjs",
-    "verify:conformance": "esbuild scripts/verify-midi-conformance.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-conformance.mjs --log-level=error && node node_modules/.cache/verify-conformance.mjs"
+    "verify:conformance": "esbuild scripts/verify-midi-conformance.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-conformance.mjs --log-level=error && node node_modules/.cache/verify-conformance.mjs",
+    "verify:ai": "esbuild scripts/verify-ai-melody.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-ai.mjs --log-level=error && node node_modules/.cache/verify-ai.mjs",
+    "verify:all": "npm run verify:conformance && npm run verify:midi && npm run verify:ai && npm run verify:melody-only && npm run verify:melody && npm run verify:techno && npm run verify:channels"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
