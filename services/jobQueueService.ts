@@ -7,6 +7,7 @@ import { forensicFixerService } from './forensicFixerService';
 import { contextBridge } from './contextBridgeService';
 import { midiRendererService, RenderProfile } from './midiRendererService';
 import { inspectAndHealGroove, inspectAudioBlob, QualityReport } from './qualityGateService';
+import { describeAudioPickError } from './audioFilePicker';
 
 export type JobType = 'MIDI_GENERATION' | 'AUDIO_REGRESSION' | 'FORENSIC_ANALYSIS' | 'FORENSIC_STUDY' | 'MELODY_ARCHITECT' | 'MIDI_RENDER';
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -41,6 +42,10 @@ class JobQueueService {
     }
 
     public addAudioJob(file: File, overrideBpm?: number) {
+        const pickError = describeAudioPickError(file);
+        if (pickError) {
+            throw new Error(pickError);
+        }
         const job: Job = { id: `AUDIO-${Date.now()}`, type: 'AUDIO_REGRESSION', status: 'PENDING', name: `Audio to MIDI: ${file.name}`, progress: 0, createdAt: Date.now(), payload: { file, overrideBpm } };
         this.jobs.unshift(job);
         this.notify();

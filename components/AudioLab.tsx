@@ -8,6 +8,7 @@ import { GrooveObject, NoteEvent } from '../types';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
 import { theoryEngine } from '../services/theoryEngine';
 import { SourceExportButton } from './SourceExportButton';
+import { describeAudioPickError, DESKTOP_AUDIO_ACCEPT, isPhoneFilePicker } from '../services/audioFilePicker';
 
 interface AudioLabProps {
     onClose: () => void;
@@ -99,7 +100,9 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
     const [progress, setProgress] = useState(0);
     const [manualBpm, setManualBpm] = useState<number>(0);
     const [showSettings, setShowSettings] = useState(false);
+    const [pickError, setPickError] = useState<string | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    const nativeInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         // If no active job ID, look for the most recent AUDIO_REGRESSION job that isn't completed or failed
@@ -116,20 +119,42 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
         });
     }, [activeJobId]);
 
-    const onDrop = useCallback((files: File[]) => {
-        if (files.length === 0) return;
-        const file = files[0];
+    const startAudioJob = useCallback((file: File) => {
+        const error = describeAudioPickError(file);
+        if (error) {
+            setPickError(error);
+            return;
+        }
+        setPickError(null);
         setAudioUrl(URL.createObjectURL(file));
         const overrideBpm = manualBpm > 20 ? manualBpm : undefined;
         setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm));
     }, [manualBpm]);
 
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
-        onDrop, 
-        accept: { 'audio/*': ['.mp3', '.wav', '.flac'] }, 
-        maxFiles: 1, 
-        disabled: !!activeJobId 
+    const onDrop = useCallback((files: File[]) => {
+        if (files.length === 0) return;
+        startAudioJob(files[0]);
+    }, [startAudioJob]);
+
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+        onDrop,
+        maxFiles: 1,
+        multiple: false,
+        disabled: !!activeJobId,
+        useFsAccessApi: false,
+        noClick: true,
+        noKeyboard: true,
     } as any);
+
+    const openPhonePicker = () => {
+        nativeInputRef.current?.click();
+    };
+
+    const onNativePick = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (file) startAudioJob(file);
+    };
 
     useEffect(() => {
         if (!isPlaying) return;
@@ -193,14 +218,35 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
             <div className="flex-1 p-4 md:p-8 overflow-y-auto custom-scrollbar">
                 {!activeJob ? (
                     <div className="max-w-4xl mx-auto space-y-8">
-                        <div {...getRootProps()} className={`w-full min-h-[220px] md:h-96 border-2 border-dashed rounded-3xl md:rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] px-4 py-8 ${isDragActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/10'}`}>
+                        <div {...getRootProps()} className={`w-full min-h-[220px] md:h-96 border-2 border-dashed rounded-3xl md:rounded-[3rem] flex flex-col items-center justify-center bg-[#0A0A0C] px-4 py-8 ${isDragActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/10'}`}>
                             <input {...getInputProps()} />
+                            <input
+                                ref={nativeInputRef}
+                                type="file"
+                                className="hidden"
+                                accept={isPhoneFilePicker() ? undefined : DESKTOP_AUDIO_ACCEPT}
+                                onChange={onNativePick}
+                            />
                             <div className="w-16 h-16 md:w-24 md:h-24 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 border border-blue-500/20">
                                 <AudioWaveform size={32} className={isDragActive ? 'text-blue-400 animate-pulse' : 'text-gray-500'} />
                             </div>
                             <h3 className="text-lg md:text-2xl font-black uppercase tracking-widest text-white italic text-center">Audio to MIDI</h3>
-                            <p className="text-xs md:text-sm text-gray-500 font-medium mt-3 uppercase text-center max-w-sm">Tap to choose an audio file</p>
-                            <span className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black uppercase">Choose file</span>
+                            <p className="text-sm text-gray-300 font-medium mt-3 text-center max-w-sm" dir="rtl">
+                                בחרו קובץ שמע מהטלפון: MP3, WAV, M4A או AAC
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1 text-center max-w-xs" dir="rtl">
+                                לא קובץ MIDI. אם פותחים תיקייה יופיעו כל הקבצים — בחרו שיר, לא .mid
+                            </p>
+                            <button
+                                type="button"
+                                onClick={openPhonePicker}
+                                className="mt-5 px-6 py-3 rounded-xl bg-blue-600 text-white text-sm font-black uppercase active:scale-95"
+                            >
+                                בחרו קובץ שמע
+                            </button>
+                            {pickError && (
+                                <p className="mt-4 text-sm text-amber-400 text-center max-w-sm font-bold" dir="rtl">{pickError}</p>
+                            )}
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

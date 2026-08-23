@@ -7,6 +7,7 @@ import { Midi } from '@tonejs/midi';
 import { theoryEngine } from '../services/theoryEngine';
 import { jobQueueService } from '../services/jobQueueService';
 import { downloadFullArrangementMidi } from '../services/midiService';
+import { describeAudioPickError, DESKTOP_AUDIO_ACCEPT, isPhoneFilePicker } from '../services/audioFilePicker';
 
 interface ToolsViewProps {
   onAnalyzeStart: (file: File) => void;
@@ -111,17 +112,32 @@ const ToolsView: React.FC<ToolsViewProps> = ({ onAnalyzeStart, studyState, onInj
         }
     }, [activeTool]);
 
-    const onAudioDrop = (files: File[]) => {
-        if (files.length === 0) return;
-        const file = files[0];
+    const [audioPickError, setAudioPickError] = useState<string | null>(null);
+    const audioNativeRef = useRef<HTMLInputElement | null>(null);
+
+    const startAudioJob = (file: File) => {
+        const error = describeAudioPickError(file);
+        if (error) {
+            setAudioPickError(error);
+            return;
+        }
+        setAudioPickError(null);
         const id = jobQueueService.addAudioJob(file);
         setActiveJobId(id);
     };
 
+    const onAudioDrop = (files: File[]) => {
+        if (files.length === 0) return;
+        startAudioJob(files[0]);
+    };
+
     const { getRootProps: getAudioRoot, getInputProps: getAudioInput, isDragActive: isAudioDrag } = useDropzone({
         onDrop: onAudioDrop,
-        accept: { 'audio/*': ['.mp3', '.wav', '.flac'] },
-        maxFiles: 1
+        maxFiles: 1,
+        multiple: false,
+        useFsAccessApi: false,
+        noClick: true,
+        noKeyboard: true,
     } as any);
 
     // Forensic File Drop
@@ -277,24 +293,45 @@ const ToolsView: React.FC<ToolsViewProps> = ({ onAnalyzeStart, studyState, onInj
                         <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in">
                             <div className="text-center">
                                 <h2 className="text-3xl font-black uppercase text-white mb-2">Audio <span className="text-blue-500">Analysis</span></h2>
-                                <p className="text-gray-400 text-sm">Upload an audio file (MP3/WAV) to extract musical structure and notes.</p>
+                                <p className="text-gray-300 text-sm" dir="rtl">בחרו קובץ שמע (MP3, WAV, M4A) — לא קובץ MIDI</p>
                             </div>
                             <div 
                                 {...getAudioRoot()} 
                                 className={`
-                                    h-64 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center cursor-pointer transition-all
+                                    min-h-64 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center transition-all px-4 py-8
                                     ${isAudioDrag ? 'border-blue-500 bg-blue-500/10' : 'border-white/10 hover:border-white/20 hover:bg-white/5'}
                                 `}
                             >
                                 <input {...getAudioInput()} />
+                                <input
+                                    ref={audioNativeRef}
+                                    type="file"
+                                    className="hidden"
+                                    accept={isPhoneFilePicker() ? undefined : DESKTOP_AUDIO_ACCEPT}
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        e.target.value = '';
+                                        if (file) startAudioJob(file);
+                                    }}
+                                />
                                 <div className="flex flex-col items-center gap-4">
                                     <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center border border-blue-500/20">
                                         <AudioWaveform className="w-10 h-10 text-blue-400" />
                                     </div>
                                     <div className="text-center">
                                         <h3 className="text-lg font-bold text-white uppercase tracking-widest">Drop Audio File</h3>
-                                        <p className="text-xs text-gray-500 font-mono mt-1">MP3, WAV, FLAC (Max 20MB)</p>
+                                        <p className="text-xs text-gray-400 mt-1" dir="rtl">MP3, WAV, M4A, AAC, OGG, FLAC</p>
                                     </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => audioNativeRef.current?.click()}
+                                        className="px-6 py-3 rounded-xl bg-blue-600 text-white text-sm font-black uppercase active:scale-95"
+                                    >
+                                        בחרו קובץ שמע
+                                    </button>
+                                    {audioPickError && (
+                                        <p className="text-sm text-amber-400 font-bold text-center max-w-sm" dir="rtl">{audioPickError}</p>
+                                    )}
                                 </div>
                             </div>
                         </div>
