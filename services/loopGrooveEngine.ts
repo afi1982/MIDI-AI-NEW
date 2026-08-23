@@ -29,6 +29,17 @@ const makeRng = (seed: number): Rng => {
 const pick = <T,>(rng: Rng, items: T[]): T => items[Math.floor(rng() * items.length) % items.length];
 const irand = (rng: Rng, min: number, max: number) => min + Math.floor(rng() * (max - min + 1));
 
+export type StyleId = 'goa' | 'fullon' | 'power' | 'melodic' | 'techno';
+
+export function styleOf(genre: string): StyleId {
+  const g = String(genre || '');
+  if (g.includes('Goa')) return 'goa';
+  if (g.includes('Power')) return 'power';
+  if (g.includes('Melodic')) return 'melodic';
+  if (g.includes('Techno')) return 'techno';
+  return 'fullon';
+}
+
 /** Shared 16-step pocket every instrument locks to. */
 export interface GrooveKit {
   seed: number;
@@ -227,25 +238,141 @@ function bassMap(bar: number, kit: GrooveKit, complex: boolean, techno: boolean)
   return out;
 }
 
-const ACID_SHAPES: number[][] = [
-  [0, -1, 0, 1, 0, -1, 0, 0, 1, -1, 0, 3, 0, -1, 0, 1],
-  [0, 0, 1, 0, 3, 0, 1, 0, 0, 3, 1, 0, 4, 0, 1, 0],
-  [0, 1, 0, 3, 0, 1, 3, 0, 5, 3, 1, 0, 3, 1, 0, -1],
-  [0, -1, 3, 0, -1, 1, 0, 5, 0, -1, 3, 1, 0, -1, 4, 0],
-  [0, 0, 0, 1, 0, 0, 3, 0, 0, 1, 0, 4, 0, 3, 1, 0],
-  [3, 0, 1, 0, 0, 3, 0, 1, 5, 0, 3, 0, 1, 0, 0, 3],
-  [0, 1, 3, 5, 3, 1, 0, -1, 0, 1, 0, 3, 1, 0, -1, -1],
-  [0, -1, -1, 0, 3, -1, 1, 0, 0, -1, 5, 3, 1, 0, 3, 0],
-];
+const ACID_BY_STYLE: Record<StyleId, number[][]> = {
+  goa: [
+    [0, 1, 0, 3, 1, 0, 5, 3, 0, 1, 3, 5, 3, 1, 0, 1],
+    [0, 1, 3, 5, 7, 5, 3, 1, 0, 1, 0, 3, 5, 3, 1, 0],
+    [3, 1, 0, 1, 3, 5, 3, 1, 0, 1, 3, 0, 5, 3, 1, 0],
+    [0, 0, 1, 3, 1, 0, 3, 5, 7, 5, 3, 1, 0, 1, 3, 0],
+  ],
+  fullon: [
+    [0, -1, 0, 1, 0, -1, 0, 0, 1, -1, 0, 3, 0, -1, 0, 1],
+    [0, -1, 1, 0, 3, -1, 1, 0, 0, -1, 3, 1, 0, -1, 1, 0],
+    [0, -1, 0, 3, -1, 1, 0, -1, 5, -1, 3, 0, 1, -1, 0, -1],
+    [0, 0, -1, 1, 0, -1, 3, 0, 0, 1, -1, 4, 0, -1, 1, 0],
+  ],
+  power: [
+    [0, 0, 0, 4, 0, 0, 1, 0, 0, 4, 0, 1, 0, 0, 4, 0],
+    [0, -1, 0, 4, 0, 1, 0, 4, 0, -1, 0, 4, 1, 0, 4, 0],
+    [0, 0, 4, 0, 0, 1, 4, 0, 0, 0, 4, 1, 0, 4, 0, 0],
+    [4, 0, 0, 4, 0, 0, 1, 0, 4, 0, 0, 1, 0, 4, 0, 1],
+  ],
+  melodic: [
+    [0, -1, -1, -1, 3, -1, -1, -1, 5, -1, -1, -1, 3, -1, 0, -1],
+    [0, -1, -1, 2, -1, -1, 3, -1, -1, -1, 5, -1, -1, 3, -1, -1],
+    [3, -1, -1, -1, 0, -1, -1, -1, 5, -1, -1, -1, 0, -1, -1, -1],
+    [0, -1, 3, -1, -1, -1, 5, -1, -1, 3, -1, -1, 0, -1, -1, -1],
+  ],
+  techno: [
+    [-1, -1, 0, -1, -1, -1, 0, -1, -1, -1, 0, -1, -1, 3, 0, -1],
+    [-1, 0, -1, -1, -1, 0, -1, -1, -1, 0, -1, 3, -1, -1, 0, -1],
+    [0, -1, -1, 0, -1, -1, 0, -1, -1, -1, 0, -1, 3, -1, 0, -1],
+    [-1, -1, 0, 0, -1, -1, -1, 0, -1, -1, 0, -1, -1, -1, 0, 3],
+  ],
+};
 
-const LEAD_ARCS: number[][][] = [
-  [[0, 8], [3, 8], [5, 8], [0, 8]],
-  [[0, 4], [2, 4], [3, 4], [5, 4]],
-  [[0, 6], [5, 4], [3, 4], [0, 8]],
-  [[2, 8], [0, 4], [7, 4], [5, 8]],
-  [[0, 3], [2, 2], [3, 3], [5, 8]],
-  [[5, 4], [3, 4], [2, 4], [0, 8]],
-];
+type LeadHit = { step: number; deg: number; dur: number; vel: number; oct: number };
+
+function leadHitsForStyle(style: StyleId, bar: number, complex: boolean, variant: number): LeadHit[] {
+  const v = variant % 4;
+  if (style === 'goa') {
+    if (!complex) {
+      const degs = [[0, 1, 3, 0], [0, 3, 5, 1], [5, 3, 1, 0], [3, 5, 7, 3]][v];
+      return [0, 4, 8, 12].map((s, i) => ({ step: s, deg: degs[(i + bar) % 4], dur: 3 * TICKS_16, vel: 0.74, oct: bar >= 2 ? 12 : 0 }));
+    }
+    const run = [
+      [0, 1, 3, 1, 0, 3, 5, 3, 0, 1, 3, 5, 7, 5, 3, 1],
+      [0, 1, 0, 3, 1, 5, 3, 1, 0, 3, 5, 7, 5, 3, 1, 0],
+      [3, 1, 0, 1, 3, 5, 7, 5, 3, 1, 0, 1, 3, 5, 3, 0],
+      [0, 1, 3, 5, 3, 1, 0, 1, 5, 3, 1, 0, 3, 5, 7, 5],
+    ][v];
+    return run.map((deg, s) => ({
+      step: s,
+      deg,
+      dur: 70,
+      vel: 0.62 + (s % 4) * 0.06,
+      oct: (bar === 2 && s >= 8) || bar === 3 ? 12 : 0,
+    }));
+  }
+
+  if (style === 'melodic') {
+    const arcs: [number, number, number][][] = [
+      [[0, 0, 8], [5, 8, 8]],
+      [[3, 0, 6], [0, 8, 8]],
+      [[7, 0, 8], [5, 8, 8]],
+      [[5, 0, 4], [3, 4, 4], [0, 8, 8]],
+    ];
+    const row = arcs[(v + bar) % arcs.length];
+    return row.map(([deg, step, dur]) => ({ step, deg, dur: dur * TICKS_16 - 10, vel: 0.78, oct: 0 }));
+  }
+
+  if (style === 'techno') {
+    const stabs = complex
+      ? [[0, 6], [0, 10], [3, 6, 14], [0, 4, 12]][bar]
+      : [[0], [0], [5], [0]][bar];
+    return stabs.map((step, i) => ({
+      step,
+      deg: i === 0 ? (v % 2 === 0 ? 0 : 3) : 5,
+      dur: (complex ? 3 : 6) * TICKS_16,
+      vel: 0.82,
+      oct: 0,
+    }));
+  }
+
+  if (style === 'power') {
+    if (!complex) {
+      return [
+        { step: 0, deg: 0, dur: 3 * TICKS_16, vel: 0.84, oct: 0 },
+        { step: 8, deg: 4, dur: 3 * TICKS_16, vel: 0.8, oct: 0 },
+      ];
+    }
+    const cells = bar === 3 ? [0, 2, 4, 6, 8, 11, 12, 14] : [0, 3, 6, 8, 12];
+    return cells.map((s, i) => ({
+      step: s,
+      deg: [0, 4, 0, 5, 3, 0, 4, 0][(i + v) % 8],
+      dur: 2 * TICKS_16,
+      vel: 0.8 + (i % 3) * 0.05,
+      oct: bar === 2 && i > 2 ? 12 : 0,
+    }));
+  }
+
+  // fullon — soaring 4-bar hook
+  if (!complex) {
+    const hook = [[0, 0, 8], [3, 8, 8], [5, 0, 8], [0, 8, 8]][bar] as [number, number, number];
+    const second: [number, number, number] = bar === 2 ? [7, 8, 8] : [hook[0] === 0 ? 3 : 0, (hook[1] + 8) % 16, 8];
+    return [
+      { step: hook[1] % 16, deg: hook[0], dur: hook[2] * TICKS_16 - 12, vel: 0.78, oct: 0 },
+      { step: second[1], deg: second[0], dur: second[2] * TICKS_16 - 12, vel: 0.82, oct: 0 },
+    ];
+  }
+  const story: LeadHit[][] = [
+    [
+      { step: 0, deg: 0, dur: 3 * TICKS_16, vel: 0.74, oct: 0 },
+      { step: 4, deg: 2, dur: 2 * TICKS_16, vel: 0.78, oct: 0 },
+      { step: 8, deg: 3, dur: 4 * TICKS_16, vel: 0.84, oct: 0 },
+    ],
+    [
+      { step: 0, deg: 3, dur: 4 * TICKS_16, vel: 0.8, oct: 0 },
+      { step: 8, deg: 2, dur: 2 * TICKS_16, vel: 0.74, oct: 0 },
+      { step: 12, deg: 0, dur: 4 * TICKS_16, vel: 0.82, oct: 0 },
+    ],
+    [
+      { step: 0, deg: 5, dur: 3 * TICKS_16, vel: 0.88, oct: 0 },
+      { step: 4, deg: 7, dur: 4 * TICKS_16, vel: 0.92, oct: 12 },
+      { step: 10, deg: 5, dur: 2 * TICKS_16, vel: 0.84, oct: 0 },
+      { step: 12, deg: 3, dur: 4 * TICKS_16, vel: 0.8, oct: 0 },
+    ],
+    [
+      { step: 0, deg: 7, dur: 2 * TICKS_16, vel: 0.9, oct: 0 },
+      { step: 3, deg: 5, dur: 2 * TICKS_16, vel: 0.84, oct: 0 },
+      { step: 6, deg: 3, dur: 2 * TICKS_16, vel: 0.78, oct: 0 },
+      { step: 8, deg: 2, dur: 2 * TICKS_16, vel: 0.74, oct: 0 },
+      { step: 12, deg: 0, dur: 4 * TICKS_16, vel: 0.9, oct: 0 },
+    ],
+  ];
+  const lift = v === 1 ? 1 : v === 2 ? 2 : 0;
+  return story[bar].map((h) => ({ ...h, deg: h.deg + lift }));
+}
 
 function writeDegrees(
   dest: NoteEvent[],
@@ -276,8 +403,8 @@ export function composeSeededLoop(
   const kit = buildGrooveKit(seed);
   const scale = theoryEngine.getScaleIntervals(scaleName);
   const root = theoryEngine.getMidiNote(`${key}1`);
-  const techno = String(genre).includes('Techno') || String(genre).includes('Melodic');
-  const goa = String(genre).includes('Goa');
+  const style = styleOf(String(genre));
+  const techno = style === 'techno' || style === 'melodic';
   const complex = complexity === 'COMPLEX';
   const out: NoteEvent[] = [];
   const ch = channel.toUpperCase();
@@ -361,18 +488,24 @@ export function composeSeededLoop(
     }
 
     if (ch.includes('ACID')) {
-      const shape = ACID_SHAPES[kit.acidStyle].slice();
-      if (complex) {
-        for (let s = 0; s < 16; s++) {
-          if (shape[s] < 0 && kit.pocket[s] > 0.72) shape[s] = (kit.acidStyle + s) % 5;
-        }
-        if (bar === 2) shape.forEach((d, i) => { if (d >= 0) shape[i] = Math.min(7, d + 1); });
-        if (bar === 3) shape[15] = 0;
-      } else if (bar % 2 === 1) {
-        shape.forEach((d, i) => { if (i % 4 === 2) shape[i] = -1; });
+      const bank = ACID_BY_STYLE[style];
+      const shape = bank[kit.acidStyle % bank.length].slice();
+      if (!complex) {
+        shape.forEach((d, i) => {
+          if (style === 'goa' && i % 2 === 1) shape[i] = -1;
+          else if (style !== 'goa' && style !== 'techno' && i % 4 === 3) shape[i] = -1;
+        });
+      } else if (style === 'goa' && bar === 2) {
+        shape.forEach((d, i) => { if (d >= 0) shape[i] = Math.min(8, d + 2); });
+      } else if (style === 'fullon' && bar === 3) {
+        shape[14] = 0;
+        shape[15] = 3;
+      } else if (style === 'power' && bar === 3) {
+        for (let s = 12; s < 16; s++) shape[s] = s % 2 === 0 ? 0 : 4;
       }
-      const oct = goa && bar >= 2 ? 24 : 12;
-      writeDegrees(out, shape, bar, root, scale, oct, complex ? 48 : 70, 0.74);
+      const oct = style === 'goa' ? (bar >= 2 ? 24 : 12) : style === 'power' ? 0 : style === 'techno' ? 12 : 12;
+      const dur = style === 'goa' ? (complex ? 42 : 58) : style === 'melodic' ? 140 : style === 'techno' ? 40 : complex ? 48 : 72;
+      writeDegrees(out, shape, bar, root, scale, oct, dur, style === 'power' ? 0.86 : 0.74);
       continue;
     }
 
@@ -429,20 +562,13 @@ export function composeSeededLoop(
       continue;
     }
 
-    // Leads — 4-bar story, seed picks the contour
-    const arc = LEAD_ARCS[kit.leadStyle];
-    const chapter = arc[bar];
-    if (!complex) {
-      out.push(note(root + 36 + scale[chapter[0] % scale.length], bar, 0, chapter[1] * TICKS_16 - 8, 0.7));
-      const second = (chapter[0] + 2) % scale.length;
-      out.push(note(root + 36 + scale[second], bar, 8, 8 * TICKS_16 - 8, 0.76));
-    } else {
-      const cells = bar === 2 ? [0, 3, 6, 8, 12] : bar === 3 ? [0, 2, 5, 8, 11, 12] : [0, 4, 8, 12];
-      cells.forEach((s, i) => {
-        const deg = (chapter[0] + i + (bar === 2 ? 2 : 0)) % (scale.length + 2);
-        out.push(note(root + 36 + scale[deg % scale.length] + (bar === 2 && i > 2 ? 12 : 0), bar, s, (bar === 0 ? 3 : 2) * TICKS_16, 0.72 + i * 0.04));
-      });
-    }
+    const hits = leadHitsForStyle(style, bar, complex, kit.leadStyle);
+    hits.forEach((h) => {
+      const oct = Math.floor(h.deg / scale.length);
+      const d = ((h.deg % scale.length) + scale.length) % scale.length;
+      const register = style === 'goa' ? 36 : style === 'power' ? 24 : 36;
+      out.push(note(root + register + scale[d] + oct * 12 + h.oct, bar, h.step, h.dur, h.vel));
+    });
   }
 
   return out;

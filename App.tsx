@@ -18,6 +18,7 @@ import { AudioLab } from './components/AudioLab.tsx';
 import { AudioRenderer } from './components/AudioRenderer.tsx';
 import { getEngineStats, engineProfileService } from './services/engineProfileService';
 import { unlockAudio } from './services/audioUnlock';
+import { audioService } from './services/audioService';
 
 const GENRE_BPM_MAP: Record<MusicGenre, number> = {
     [MusicGenre.PSYTRANCE_FULLON]: 145,
@@ -69,9 +70,14 @@ export default function App() {
     }
   }, [groove, view]);
 
-  const handleOpenProjectInReview = (g: GrooveObject) => {
+  const openGrooveInStudio = async (g: GrooveObject) => {
       setGroove(g);
-      setView('STUDIO'); 
+      setView('STUDIO');
+      try { await audioService.playGroove(g, 0); } catch {}
+  };
+
+  const handleOpenProjectInReview = (g: GrooveObject) => {
+      void openGrooveInStudio(g);
   };
 
   const handleGenreChange = (newGenre: MusicGenre) => {
@@ -117,7 +123,7 @@ export default function App() {
         {view === 'STUDIO' && <StudioPage initialGroove={groove} onUpdate={setGroove} onClose={() => setView('WELCOME')} />}
         {view === 'JOBS' && <JobsCenterPage onOpenGroove={handleOpenProjectInReview} onClose={() => setView('WELCOME')} />}
         {view === 'GENERATOR' && <SingleChannelGenerator onClose={() => setView('TOOLS')} />}
-        {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('TOOLS')} onOpenInStudio={(g) => { setGroove(g); setView('STUDIO'); }} />}
+        {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('TOOLS')} onOpenInStudio={(g) => { void openGrooveInStudio(g); }} />}
         {view === 'RENDERER' && <AudioRenderer onClose={() => setView('TOOLS')} />}
 
         {view === 'CREATE' && (

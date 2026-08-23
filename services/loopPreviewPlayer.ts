@@ -7,7 +7,11 @@ export const loopPreviewPlayer = {
   },
 
   isUnlocked() {
-    return audioService.isPlaying() || true;
+    return true;
+  },
+
+  isPlaying() {
+    return audioService.isPlaying() && audioService.getMode() === 'loop';
   },
 
   contextState() {
@@ -18,7 +22,7 @@ export const loopPreviewPlayer = {
     audioService.stop();
   },
 
-  async play(notes: NoteEvent[], bpm: number, channel: ChannelKey = 'ch4_leadA') {
-    return audioService.playLoop(notes, bpm, channel);
+  async play(notes: NoteEvent[], bpm: number, channel: ChannelKey = 'ch4_leadA', genre?: string) {
+    return audioService.playLoop(notes, bpm, channel, genre);
   },
 };

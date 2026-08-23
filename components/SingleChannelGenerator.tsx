@@ -89,13 +89,13 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
 
     const notesRef = useRef<NoteEvent[]>([]);
     const playingRef = useRef(false);
-    const paramsRef = useRef({ channel, bpm, key, scale });
+    const paramsRef = useRef({ channel, bpm, key, scale, genre });
     const [sessionRhythmMask, setSessionRhythmMask] = useState<number[]>([]);
     const [sessionMotif, setSessionMotif] = useState<number[] | null>(null);
     const [grooveSeed, setGrooveSeed] = useState(() => (Date.now() ^ (Math.random() * 1e9)) >>> 0);
     const grooveSeedRef = useRef(grooveSeed);
 
-    paramsRef.current = { channel, bpm, key, scale };
+    paramsRef.current = { channel, bpm, key, scale, genre };
     grooveSeedRef.current = grooveSeed;
     notesRef.current = generatedNotes;
 
@@ -129,7 +129,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         setAudioError(null);
         try {
             await loopPreviewPlayer.unlock();
-            await loopPreviewPlayer.play(notes, paramsRef.current.bpm, paramsRef.current.channel);
+            await loopPreviewPlayer.play(notes, paramsRef.current.bpm, paramsRef.current.channel, paramsRef.current.genre);
             playingRef.current = true;
             setIsPlaying(true);
         } catch (err: any) {
@@ -171,6 +171,20 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         const healed = commitGenerated(notes, meta, channel, key, scale);
         if (wasPlaying) void playNotes(healed);
     };
+
+    useEffect(() => {
+        let raf = 0;
+        const sync = () => {
+            const live = loopPreviewPlayer.isPlaying();
+            if (playingRef.current !== live) {
+                playingRef.current = live;
+                setIsPlaying(live);
+            }
+            raf = requestAnimationFrame(sync);
+        };
+        raf = requestAnimationFrame(sync);
+        return () => cancelAnimationFrame(raf);
+    }, []);
 
     useEffect(() => {
         const glue = Array.from({ length: 16 }, () => Math.random() > 0.5 ? 1 : 0);
@@ -273,7 +287,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                         </button>
                     </div>
                     <p className="text-[11px] text-gray-400 text-center" dir="rtl">
-                        כל לחיצה על New loop מחליפה קצב לכל הכלים. החלפת כלי נשארת על אותו גרוב.
+                        הסגנון מחליף את אופי הליד והאסיד (לא רק את ה-BPM). New loop מחליף גרוב. ליד ואסיד נשמעים שונה.
                     </p>
                     <button
                         onClick={() => {

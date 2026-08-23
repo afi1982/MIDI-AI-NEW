@@ -8,7 +8,6 @@ import { MidiVisualizer } from './MidiVisualizer';
 import { downloadFullArrangementMidi, importMidiAsGroove } from '../services/midiService';
 import { ArrowLeft, Play, Pause, Maximize2, Minimize2, Plus, FastForward, Columns, Rows, ZoomIn, ZoomOut, FilePlus, Download } from 'lucide-react';
 import { theoryEngine } from '../services/theoryEngine';
-import * as Tone from 'tone';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
 
 interface StudioPageProps {
@@ -78,17 +77,27 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const handleSeek = (time: number) => {
         const t = Math.max(0, Math.min(time, totalSeconds));
         setPlaybackTime(t);
-        void audioService.seek(t);
+        if (audioService.isPlaying()) {
+            void audioService.seek(t);
+            return;
+        }
+        void audioService.playGroove(grooveRef.current, t).then((count) => {
+            setLoadedNotes(count);
+            setPlayError(null);
+        }).catch((err: any) => {
+            setPlayError(err?.message || 'לא מצליחים להריץ קדימה. לחצו Play.');
+        });
     };
 
     const handlePlay = async () => {
-        if (isPlaying) {
+        if (audioService.isPlaying()) {
             audioService.stop();
             return;
         }
         setPlayError(null);
         try {
-            const count = await audioService.playGroove(grooveRef.current, 0);
+            const from = playbackTime > 0.25 && playbackTime < totalSeconds - 0.4 ? playbackTime : 0;
+            const count = await audioService.playGroove(grooveRef.current, from);
             setLoadedNotes(count);
         } catch (err: any) {
             setPlayError(err?.message || 'לא מצליחים להשמיע. לחצו Play שוב.');
@@ -219,7 +228,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                     <StudioArrangement 
                         groove={{...groove, bpm: currentBpm}} activeTrack={activeTrack} 
                         onSelectTrack={handleSelectTrack} playbackTime={playbackTime}
-                        onSeek={() => {}} onUpdateTrack={handleUpdateTrack}
+                        onSeek={handleSeek} onUpdateTrack={handleUpdateTrack}
                         onSampleLoad={handleAudioRefresh}
                         showSidebar={showSidebar}
                         pixelsPerBar={timelineZoom}
@@ -284,7 +293,20 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                 <div className="px-3 py-2 text-[11px] text-amber-200 bg-amber-500/15 border-t border-amber-500/30 text-center" dir="rtl">{playError}</div>
             )}
             <div className="h-16 md:h-24 bg-[#0A0A0B] border-t border-white/10 flex flex-col items-center justify-center gap-0.5 shrink-0 pb-safe z-[100] px-2 md:px-6">
-                <input type="range" min="0" max={totalSeconds} step="0.1" value={playbackTime} onChange={(e) => handleSeek(parseFloat(e.target.value))} className="w-full max-w-6xl h-1 bg-zinc-900 rounded-full appearance-none accent-sky-500 cursor-pointer mb-1 md:mb-3" />
+                <input
+                    type="range"
+                    min="0"
+                    max={totalSeconds}
+                    step="0.1"
+                    value={Math.min(playbackTime, totalSeconds)}
+                    onChange={(e) => {
+                        const t = parseFloat(e.target.value);
+                        setPlaybackTime(t);
+                        if (audioService.isPlaying()) void audioService.seek(t);
+                    }}
+                    onPointerUp={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
+                    className="w-full max-w-6xl h-1 bg-zinc-900 rounded-full appearance-none accent-sky-500 cursor-pointer mb-1 md:mb-3"
+                />
                 <div className="flex items-center gap-4 md:gap-12">
                     <button onClick={() => handleSeek(0)} className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 text-zinc-500 hover:text-white flex items-center justify-center transition-all">
                         <div className="w-2 h-2 bg-current rounded-sm"></div>

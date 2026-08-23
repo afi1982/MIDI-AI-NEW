@@ -342,7 +342,8 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   const bpm = options.bpm && options.bpm > 40 ? options.bpm : analysis.bpm;
   const key = options.key || analysis.key;
   const scale = options.scale || analysis.scale;
-  const minutes = Math.max(2, Math.min(4, analysis.durationSec / 60 || 2));
+  const PREVIEW_BARS = 32;
+  const minutes = (PREVIEW_BARS * 4) / Math.max(80, bpm);
   const groove = composeProfessionalTrack(
     { bpm, key, scale, genre: options.genre, trackName: options.trackName || `From Audio · ${key} ${scale}` },
     minutes,
@@ -454,10 +455,21 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     }), 8, Math.max(16, totalBars - 16));
   }
 
-  const PREVIEW_BARS = 32;
+  const lastTick = PREVIEW_BARS * 1920;
+  const keepAcross = (notes: NoteEvent[], max: number) => {
+    const inRange = notes
+      .filter((n) => (n.startTick || 0) < lastTick)
+      .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+    if (inRange.length <= max) return inRange;
+    const out: NoteEvent[] = [];
+    const step = inRange.length / max;
+    for (let i = 0; i < max; i++) out.push(inRange[Math.min(inRange.length - 1, Math.floor(i * step))]);
+    return out;
+  };
   ELITE_16_CHANNELS.forEach((ch) => {
     const notes = ((groove as any)[ch] || []) as NoteEvent[];
-    (groove as any)[ch] = notes.filter((n) => (n.startTick || 0) < PREVIEW_BARS * 1920).slice(0, 240);
+    const cap = ch.includes('lead') || ch.includes('acid') || ch.includes('kick') || ch.includes('sub') ? 360 : 180;
+    (groove as any)[ch] = keepAcross(notes, cap);
   });
   groove.totalBars = PREVIEW_BARS;
 
