@@ -92,8 +92,11 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
     const paramsRef = useRef({ channel, bpm, key, scale });
     const [sessionRhythmMask, setSessionRhythmMask] = useState<number[]>([]);
     const [sessionMotif, setSessionMotif] = useState<number[] | null>(null);
+    const [grooveSeed, setGrooveSeed] = useState(() => (Date.now() ^ (Math.random() * 1e9)) >>> 0);
+    const grooveSeedRef = useRef(grooveSeed);
 
     paramsRef.current = { channel, bpm, key, scale };
+    grooveSeedRef.current = grooveSeed;
     notesRef.current = generatedNotes;
 
     const getSmartEngineProfile = (genreStr: string): GenreEngineProfile | undefined => {
@@ -163,7 +166,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
             newMotif = melodicComposer.createMotif(16, 7, genre, engineProfile);
             setSessionMotif(newMotif);
         }
-        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, newMotif, mask, genre);
+        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, newMotif, mask, genre, grooveSeedRef.current);
         const healed = commitGenerated(notes, meta, channel, key, scale);
         if (wasPlaying) void playNotes(healed);
     };
@@ -174,7 +177,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         const engineProfile = getSmartEngineProfile(genre);
         const motif = melodicComposer.createMotif(16, 7, genre, engineProfile);
         setSessionMotif(motif);
-        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, motif, glue, genre);
+        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, motif, glue, genre, grooveSeedRef.current);
         commitGenerated(notes, meta, channel, key, scale);
         return () => { stopPlayback(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,7 +196,10 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         const engineProfile = getSmartEngineProfile(newGenre);
         const motif = melodicComposer.createMotif(16, 7, newGenre, engineProfile);
         setSessionMotif(motif);
-        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpmNow, key, scale, complexity, motif, sessionRhythmMask, newGenre);
+        const nextSeed = (Date.now() ^ (Math.random() * 1e9)) >>> 0;
+        setGrooveSeed(nextSeed);
+        grooveSeedRef.current = nextSeed;
+        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpmNow, key, scale, complexity, motif, sessionRhythmMask, newGenre, nextSeed);
         commitGenerated(notes, meta, channel, key, scale);
     };
 
@@ -207,11 +213,14 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         if (next.scale) { stopPlayback(); setScale(next.scale); }
         if (next.complexity) { stopPlayback(); setComplexity(next.complexity); }
         const motif = sessionMotif || melodicComposer.createMotif(16, 7, genre, getSmartEngineProfile(genre));
-        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(nextChannel, bpm, nextKey, nextScale, nextComplexity, motif, sessionRhythmMask, genre);
+        const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(nextChannel, bpm, nextKey, nextScale, nextComplexity, motif, sessionRhythmMask, genre, grooveSeedRef.current);
         commitGenerated(notes, meta, nextChannel, nextKey, nextScale);
     };
 
     const handleManualRegenerate = () => {
+        const nextSeed = (Date.now() ^ (Math.random() * 1e9) ^ (grooveSeedRef.current * 1103515245)) >>> 0;
+        setGrooveSeed(nextSeed);
+        grooveSeedRef.current = nextSeed;
         const engineProfile = getSmartEngineProfile(genre);
         const newMotif = melodicComposer.createMotif(16, 7, genre, engineProfile);
         setSessionMotif(newMotif);
@@ -231,7 +240,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                         <h1 className="text-base font-black uppercase tracking-tighter truncate">
                             Loop <span className="text-emerald-500">Generator</span>
                         </h1>
-                        <p className="text-[10px] text-gray-500 font-bold uppercase">Version {loopVersion} · {bpm} BPM</p>
+                        <p className="text-[10px] text-gray-500 font-bold uppercase">Groove {grooveSeed.toString(36).slice(-4).toUpperCase()} · {complexity} · {bpm} BPM</p>
                     </div>
                 </div>
             </header>
@@ -262,6 +271,9 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                             <RefreshCw size={14} /> New loop
                         </button>
                     </div>
+                    <p className="text-[11px] text-gray-400 text-center" dir="rtl">
+                        כל לחיצה על New loop מחליפה קצב לכל הכלים. החלפת כלי נשארת על אותו גרוב.
+                    </p>
                     <button
                         onClick={() => {
                             const g: any = { id: `LOOP_${Date.now()}`, name: 'Loop', bpm, key, scale, totalBars: 4 };

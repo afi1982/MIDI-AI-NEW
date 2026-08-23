@@ -50,15 +50,16 @@ export class MaestroClass {
         complexity: ComplexityLevel,
         _motif: number[],
         _mask: number[],
-        genre: MusicGenre
+        genre: MusicGenre,
+        seed = 1
     ): { notes: NoteEvent[], meta: GenerationMetadata } {
         const genreId = resolveGenreId(genre);
         const engineProfile = engineProfileService.getGenreEngineProfile(genreId);
-        const notes = composeMusicalLoop(channel, bpm, key, scale, genre, complexity);
+        const notes = composeMusicalLoop(channel, bpm, key, scale, genre, complexity, seed);
         const meta: GenerationMetadata = {
             sourceFilesUsed: engineProfile.samples > 0
                 ? engineProfile.lastSources.slice(0, 3).map(s => s.file).filter(Boolean)
-                : ['Phrase Engine'],
+                : [`Groove ${seed.toString(36).slice(-4).toUpperCase()}`],
             fidelityConfidence: 100,
             enginePatternsActive: Math.max(1, engineProfile.samples)
         };
@@ -73,9 +74,10 @@ export class MaestroClass {
         complexity: ComplexityLevel,
         motif: number[],
         mask: number[],
-        genre: MusicGenre
+        genre: MusicGenre,
+        seed = 1
     ): NoteEvent[] {
-        return this.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, motif, mask, genre).notes;
+        return this.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, motif, mask, genre, seed).notes;
     }
 }
 

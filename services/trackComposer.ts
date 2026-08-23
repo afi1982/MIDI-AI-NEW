@@ -1,5 +1,6 @@
 import { ArrangementSegment, ChannelKey, EnergyLevel, GrooveObject, MusicGenre, NoteEvent, SectionType } from '../types';
 import { theoryEngine } from './theoryEngine';
+import { composeSeededLoop } from './loopGrooveEngine';
 
 const ELITE_16_CHANNELS: ChannelKey[] = [
   'ch1_kick', 'ch2_sub', 'ch3_midBass', 'ch4_leadA', 'ch5_leadB',
@@ -450,36 +451,12 @@ export function composeProfessionalTrack(
 
 export function composeMusicalLoop(
   channel: ChannelKey,
-  bpm: number,
+  _bpm: number,
   key: string,
   scaleName: string,
   genre: MusicGenre | string,
-  complexity: 'SIMPLE' | 'COMPLEX'
+  complexity: 'SIMPLE' | 'COMPLEX',
+  seed = 1
 ): NoteEvent[] {
-  const scale = theoryEngine.getScaleIntervals(scaleName);
-  const root = theoryEngine.getMidiNote(`${key}1`);
-  const isTechno = String(genre).includes('Techno') || String(genre).includes('Melodic');
-  const complex = complexity === 'COMPLEX';
-  const out: NoteEvent[] = [];
-  const r = channel.toUpperCase();
-
-  for (let bar = 0; bar < 4; bar++) {
-    if (r.includes('KICK')) out.push(...kickPattern(bar, EnergyLevel.PEAK, false, complex));
-    else if (r.includes('SUB')) out.push(...(isTechno ? technoBass(bar, root, complex) : psyBass(bar, root, 0, complex)));
-    else if (r.includes('BASS') || r.includes('MID')) out.push(...(isTechno ? technoBass(bar, root + 12, complex) : psyBass(bar, root, 1, complex)));
-    else if (r.includes('HHCLOSED') || r.includes('CLOSED')) out.push(...hatsClosed(bar, complex ? EnergyLevel.HIGH : EnergyLevel.LOW, complex));
-    else if (r.includes('HHOPEN') || r.includes('OPEN')) {
-      if (complex || bar % 2 === 0) out.push(...hatsOpen(bar));
-    } else if (r.includes('SNARE')) {
-      if (complex && bar === 3) out.push(...snareRoll(bar, 0.6));
-      else out.push(...snareBackbeat(bar));
-    } else if (r.includes('CLAP')) out.push(...clap(bar));
-    else if (r.includes('PERC') && r.includes('TRIBAL')) out.push(...(complex ? tribalPerc(bar) : tribalPerc(bar).slice(0, 2)));
-    else if (r.includes('PERC')) out.push(...percLoop(bar, complex ? bar + 3 : bar));
-    else if (r.includes('PAD')) out.push(...padChord(bar, root, scale, complex ? EnergyLevel.HIGH : EnergyLevel.LOW));
-    else if (r.includes('ACID')) out.push(...acidLine(bar, root, scale, complex));
-    else if (r.includes('ARP')) out.push(...arpPattern(bar, root, scale, complex, bar === 2));
-    else writeStoryLead(out, bar, bar, complex ? 'loop-complex' : 'loop-simple', root, scale, channel === 'ch5_leadB');
-  }
-  return out;
+  return composeSeededLoop(channel, key, scaleName, genre, complexity, seed);
 }
