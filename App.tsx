@@ -17,6 +17,7 @@ import { SingleChannelGenerator } from './components/SingleChannelGenerator.tsx'
 import { AudioLab } from './components/AudioLab.tsx';
 import { AudioRenderer } from './components/AudioRenderer.tsx';
 import { getEngineStats, engineProfileService } from './services/engineProfileService';
+import { loopPreviewPlayer } from './services/loopPreviewPlayer';
 
 const GENRE_BPM_MAP: Record<MusicGenre, number> = {
     [MusicGenre.PSYTRANCE_FULLON]: 145,
@@ -56,7 +57,10 @@ export default function App() {
         const stats = getEngineStats();
         setEngineStats(stats);
     }, 2000);
-    return () => { unsub(); clearInterval(interval); };
+    const unlock = () => { void loopPreviewPlayer.unlock(); };
+    window.addEventListener('pointerdown', unlock, { once: true });
+
+    return () => { unsub(); clearInterval(interval); window.removeEventListener('pointerdown', unlock); };
   }, []);
 
   useEffect(() => {

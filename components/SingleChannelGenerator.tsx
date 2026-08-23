@@ -8,8 +8,7 @@ import { theoryEngine } from '../services/theoryEngine';
 import { ComplexityLevel } from '../services/melodicComposer';
 import { engineProfileService, resolveGenreId } from '../services/engineProfileService';
 import { referenceStorageService } from '../services/referenceStorageService';
-import { audioService } from '../services/audioService';
-import * as Tone from 'tone';
+import { loopPreviewPlayer } from '../services/loopPreviewPlayer';
 
 interface SingleChannelGeneratorProps {
     onClose: () => void;
@@ -67,6 +66,11 @@ const getFriendlyChannelName = (key: string) => {
     return key.replace(/ch\d+_/, '').replace(/([A-Z])/g, ' $1').trim().toUpperCase();
 };
 
+const sourceLabel = (meta: GenerationMetadata | null) => {
+    const raw = meta?.sourceFilesUsed?.[0];
+    return raw && raw !== 'undefined' ? raw : 'Learned engine patterns';
+};
+
 export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ onClose }) => {
     const [channel, setChannel] = useState<ChannelKey>('ch4_leadA');
     const [bpm, setBpm] = useState(145);
@@ -78,6 +82,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
     const [genMeta, setGenMeta] = useState<GenerationMetadata | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [loopVersion, setLoopVersion] = useState(1);
+    const [audioError, setAudioError] = useState<string | null>(null);
 
     const notesRef = useRef<NoteEvent[]>([]);
     const playingRef = useRef(false);
@@ -105,43 +110,26 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
     };
 
     const stopPlayback = () => {
-        try {
-            audioService.stop();
-            Tone.Transport.stop();
-            Tone.Transport.cancel();
-            Tone.Transport.position = 0;
-        } catch {}
+        try { loopPreviewPlayer.stop(); } catch {}
         playingRef.current = false;
         setIsPlaying(false);
     };
 
     const playNotes = async (notes: NoteEvent[]) => {
-        if (!notes.length) return;
-        const { channel: ch, bpm: currentBpm, key: currentKey, scale: currentScale } = paramsRef.current;
-        await audioService.ensureInit();
-        if (Tone.context.state !== 'running') {
-            await Tone.start();
-            await Tone.context.resume();
+        if (!notes.length) {
+            setAudioError('No notes in this loop.');
+            return;
         }
-
-        const groove: any = {
-            id: `LOOP_${Date.now()}`,
-            name: 'Loop',
-            bpm: currentBpm,
-            key: currentKey,
-            scale: currentScale,
-            totalBars: 4
-        };
-        ELITE_16_CHANNELS.forEach(name => { groove[name] = []; });
-        groove[ch] = notes;
-
-        stopPlayback();
-        audioService.setBpm(currentBpm);
-        await audioService.scheduleSequence(groove);
-        Tone.Transport.position = 0;
-        await audioService.play();
-        playingRef.current = true;
-        setIsPlaying(true);
+        setAudioError(null);
+        try {
+            await loopPreviewPlayer.play(notes, paramsRef.current.bpm);
+            playingRef.current = true;
+            setIsPlaying(true);
+        } catch (err: any) {
+            playingRef.current = false;
+            setIsPlaying(false);
+            setAudioError(err?.message || 'Could not start audio. Tap Play again.');
+        }
     };
 
     const handlePlayPreview = async () => {
@@ -167,9 +155,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         setGeneratedNotes(notes);
         setGenMeta(meta);
         setLoopVersion(v => v + 1);
-        if (wasPlaying) {
-            void playNotes(notes);
-        }
+        if (wasPlaying) void playNotes(notes);
     };
 
     useEffect(() => {
@@ -190,19 +176,15 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         stopPlayback();
         setGenre(newGenre);
         setSessionMotif(null);
-        if (newGenre === MusicGenre.PSYTRANCE_FULLON) setBpm(145);
-        else if (newGenre === MusicGenre.PSYTRANCE_POWER) setBpm(142);
-        else if (newGenre === MusicGenre.GOA_TRANCE) setBpm(148);
-        else if (newGenre === MusicGenre.MELODIC_TECHNO) setBpm(126);
-        else if (newGenre === MusicGenre.TECHNO_PEAK) setBpm(132);
-        const engineProfile = getSmartEngineProfile(newGenre);
-        const motif = melodicComposer.createMotif(16, 7, newGenre, engineProfile);
-        setSessionMotif(motif);
         const bpmNow = newGenre === MusicGenre.MELODIC_TECHNO ? 126
             : newGenre === MusicGenre.TECHNO_PEAK ? 132
             : newGenre === MusicGenre.GOA_TRANCE ? 148
             : newGenre === MusicGenre.PSYTRANCE_POWER ? 142
             : 145;
+        setBpm(bpmNow);
+        const engineProfile = getSmartEngineProfile(newGenre);
+        const motif = melodicComposer.createMotif(16, 7, newGenre, engineProfile);
+        setSessionMotif(motif);
         const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpmNow, key, scale, complexity, motif, sessionRhythmMask, newGenre);
         notesRef.current = notes;
         setGeneratedNotes(notes);
@@ -247,7 +229,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                         <h1 className="text-base font-black uppercase tracking-tighter truncate">
                             Loop <span className="text-emerald-500">Generator</span>
                         </h1>
-                        <p className="text-[10px] text-gray-500 font-bold uppercase">Version {loopVersion}</p>
+                        <p className="text-[10px] text-gray-500 font-bold uppercase">Version {loopVersion} · {bpm} BPM</p>
                     </div>
                 </div>
             </header>
@@ -256,8 +238,15 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                 <div className="p-3 space-y-3 md:p-6 md:max-w-2xl md:mx-auto">
                     <SimplePianoRoll notes={generatedNotes} isEngineEnhanced={isEngineEnhanced} />
 
+                    {audioError && (
+                        <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+                            {audioError}
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-2">
                         <button
+                            onPointerDown={() => { void loopPreviewPlayer.unlock(); }}
                             onClick={() => { void handlePlayPreview(); }}
                             className={`py-4 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 ${isPlaying ? 'bg-red-500 text-white' : 'bg-white text-black'}`}
                         >
@@ -293,7 +282,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                                     {isEngineEnhanced ? 'Engine Insight' : 'Engine Status'}
                                 </div>
                                 <div className="text-xs font-bold truncate">
-                                    {isEngineEnhanced ? `Inspired by ${genMeta?.sourceFilesUsed[0]}` : 'Standard mode'}
+                                    {isEngineEnhanced ? `Inspired by ${sourceLabel(genMeta)}` : 'Standard mode'}
                                 </div>
                             </div>
                             {isEngineEnhanced && (
