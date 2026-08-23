@@ -117,7 +117,7 @@ export default function App() {
         {view === 'STUDIO' && <StudioPage initialGroove={groove} onUpdate={setGroove} onClose={() => setView('WELCOME')} />}
         {view === 'JOBS' && <JobsCenterPage onOpenGroove={handleOpenProjectInReview} onClose={() => setView('WELCOME')} />}
         {view === 'GENERATOR' && <SingleChannelGenerator onClose={() => setView('TOOLS')} />}
-        {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('TOOLS')} />}
+        {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('TOOLS')} onOpenInStudio={(g) => { setGroove(g); setView('STUDIO'); }} />}
         {view === 'RENDERER' && <AudioRenderer onClose={() => setView('TOOLS')} />}
 
         {view === 'CREATE' && (

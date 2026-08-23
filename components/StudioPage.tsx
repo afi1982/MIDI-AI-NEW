@@ -47,8 +47,20 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const [isAudioInitialized, setIsAudioInitialized] = useState(false);
     const [timelineZoom, setTimelineZoom] = useState(window.innerWidth < 768 ? 40 : 120);
     const [playError, setPlayError] = useState<string | null>(null);
+    const [loadedNotes, setLoadedNotes] = useState(0);
     const grooveRef = useRef(groove);
     grooveRef.current = groove;
+
+    useEffect(() => {
+        if (!initialGroove) return;
+        if (initialGroove.id === grooveRef.current.id && loadedNotes > 0) return;
+        setGroove(initialGroove);
+        grooveRef.current = initialGroove;
+        setCurrentBpm(initialGroove.bpm || 145);
+        setLoadedNotes(audioService.countNotes(initialGroove));
+        setPlayError(null);
+        setPlaybackTime(0);
+    }, [initialGroove]);
 
     useEffect(() => {
         let raf: number;
@@ -68,13 +80,6 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         setPlaybackTime(Tone.Transport.seconds);
     };
 
-    const syncEngine = async (g: GrooveObject) => {
-        await audioService.ensureInit();
-        setIsAudioInitialized(true);
-        audioService.setBpm(g.bpm || currentBpm);
-        return audioService.scheduleSequence({ ...g, bpm: g.bpm || currentBpm });
-    };
-
     const handlePlay = async () => {
         if (isPlaying) {
             audioService.stop();
@@ -82,17 +87,15 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         }
         setPlayError(null);
         try {
-            await syncEngine(grooveRef.current);
-            await audioService.play(playbackTime > 1 ? playbackTime : 0);
+            const count = await audioService.playGroove(grooveRef.current, 0);
+            setLoadedNotes(count);
         } catch (err: any) {
             setPlayError(err?.message || 'לא מצליחים להשמיע. לחצו Play שוב.');
         }
     };
 
     const handleAudioRefresh = async () => {
-        console.log("🔄 Sample change detected, refreshing engine...");
-        // Re-syncing the entire engine to ensure the new Sampler is picked up by the Parts
-        await syncEngine(groove);
+        try { await audioService.playGroove(grooveRef.current, 0); } catch {}
     };
 
     const handleImportMidi = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,8 +109,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
             onUpdate(newGroove);
             setCurrentBpm(newGroove.bpm || 145);
             setPlaybackTime(0);
+            setLoadedNotes(audioService.countNotes(newGroove));
             setPlayError(null);
-            await syncEngine(newGroove);
         } catch (err: any) {
             setPlayError(err?.message || String(err));
         } finally {
@@ -131,7 +134,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         const updatedGroove: any = { ...groove, [track]: notes };
         setGroove(updatedGroove);
         onUpdate(updatedGroove);
-        if (isPlaying) await syncEngine(updatedGroove);
+        if (isPlaying) { try { await audioService.playGroove(updatedGroove, Tone.Transport.seconds); } catch {} }
     };
 
     const isResizing = useRef(false);
@@ -172,6 +175,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                     <div className="flex flex-col min-w-0">
                         <span className="text-[7px] md:text-[9px] font-black uppercase tracking-[0.1em] md:tracking-[0.3em] text-sky-500 leading-none mb-0.5">STUDIO</span>
                         <h2 className="text-[9px] md:text-sm font-black uppercase tracking-tighter text-white truncate max-w-[60px] md:max-w-[200px]">{groove.name}</h2>
+                        {loadedNotes > 0 && <span className="text-[8px] text-emerald-400 font-bold">{loadedNotes} notes</span>}
                     </div>
                 </div>
                 
@@ -275,7 +279,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                 </div>
             </div>
 
-            {/* Transport Bar */}
+            {playError && (
+                <div className="px-3 py-2 text-[11px] text-amber-200 bg-amber-500/15 border-t border-amber-500/30 text-center" dir="rtl">{playError}</div>
+            )}
             <div className="h-16 md:h-24 bg-[#0A0A0B] border-t border-white/10 flex flex-col items-center justify-center gap-0.5 shrink-0 pb-safe z-[100] px-2 md:px-6">
                 <input type="range" min="0" max={totalSeconds} step="0.1" value={playbackTime} onChange={(e) => handleSeek(parseFloat(e.target.value))} className="w-full max-w-6xl h-1 bg-zinc-900 rounded-full appearance-none accent-sky-500 cursor-pointer mb-1 md:mb-3" />
                 <div className="flex items-center gap-4 md:gap-12">

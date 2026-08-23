@@ -13,6 +13,7 @@ import { QualityReportCard } from './QualityReportCard';
 
 interface AudioLabProps {
     onClose: () => void;
+    onOpenInStudio?: (groove: GrooveObject) => void;
 }
 
 const LabPianoRoll: React.FC<{ groove: GrooveObject, progress: number }> = ({ groove, progress }) => {
@@ -93,7 +94,7 @@ const LabPianoRoll: React.FC<{ groove: GrooveObject, progress: number }> = ({ gr
     );
 };
 
-export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
+export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) => {
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [activeJob, setActiveJob] = useState<Job | null>(null);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -184,7 +185,12 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                         <SourceExportButton pageKey="AUDIO_LAB" label="Acoustic Logic" />
                     </div>
                     {activeJob?.status === 'COMPLETED' && (
-                        <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">Export</span></button>
+                        <div className="flex items-center gap-2">
+                            {onOpenInStudio && (
+                                <button onClick={() => onOpenInStudio(activeJob.result)} className="px-3 md:px-4 py-2 md:py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-xs md:text-sm active:scale-95">Studio</button>
+                            )}
+                            <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">Export</span></button>
+                        </div>
                     )}
                 </div>
             </header>
@@ -315,6 +321,15 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                                 );
                             })}
                         </div>
+                        {onOpenInStudio && (
+                            <button
+                                type="button"
+                                onClick={() => onOpenInStudio(activeJob.result)}
+                                className="w-full py-4 rounded-2xl bg-emerald-600 text-white font-black uppercase text-sm"
+                            >
+                                פתחו בסטודיו והשמיעו
+                            </button>
+                        )}
                         {activeJob.quality && <QualityReportCard report={activeJob.quality} compact />}
                         <div className="flex-1 min-h-[180px] md:min-h-[320px] relative rounded-2xl overflow-hidden border border-white/10">
                             <LabPianoRoll groove={activeJob.result} progress={progress} />
