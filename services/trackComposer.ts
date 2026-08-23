@@ -39,10 +39,33 @@ const sequencePhrase = (p: Phrase, shift: number): Phrase =>
   p.map((d) => (d < 0 ? -1 : Math.max(0, d + shift)));
 
 function musicalLeadPhrases(): { A: Phrase; B: Phrase; C: Phrase } {
-  const A: Phrase = [0, -1, 2, -1, 3, 2, -1, 0, 5, -1, 3, -1, 2, -1, 0, -1];
-  const B: Phrase = [0, -1, 3, -1, 5, 3, -1, 2, 7, -1, 5, -1, 3, 2, 0, -1];
-  const C: Phrase = [7, -1, 5, -1, 3, 5, -1, 2, 3, -1, 2, -1, 0, -1, -1, -1];
-  return { A, B, C };
+  const banks = [
+    {
+      A: [0, -1, 2, -1, 3, 2, -1, 0, 5, -1, 3, -1, 2, -1, 0, -1] as Phrase,
+      B: [0, -1, 3, -1, 5, 3, -1, 2, 7, -1, 5, -1, 3, 2, 0, -1] as Phrase,
+      C: [7, -1, 5, -1, 3, 5, -1, 2, 3, -1, 2, -1, 0, -1, -1, -1] as Phrase,
+    },
+    {
+      A: [0, -1, -1, 2, 3, -1, 5, -1, 3, -1, -1, 2, 0, -1, -1, -1] as Phrase,
+      B: [5, -1, 3, -1, 2, 0, -1, 2, 3, -1, 5, -1, 3, -1, 0, -1] as Phrase,
+      C: [0, -1, 5, -1, -1, -1, 3, -1, 2, -1, 0, -1, -1, -1, -1, -1] as Phrase,
+    },
+    {
+      A: [2, -1, 3, 5, -1, 3, 2, -1, 0, -1, 2, -1, 0, -1, -1, -1] as Phrase,
+      B: [0, -1, 0, 2, 3, -1, 5, 7, 5, -1, 3, -1, 2, -1, 0, -1] as Phrase,
+      C: [3, -1, -1, 2, -1, 0, -1, -1, 5, -1, 3, -1, 0, -1, -1, -1] as Phrase,
+    },
+  ];
+  return banks[Math.floor(Math.random() * banks.length)];
+}
+
+function counterPhrase(p: Phrase): Phrase {
+  return p.map((d, i) => {
+    if (i % 4 === 0) return -1;
+    if (d >= 0) return -1;
+    if (i % 4 === 2) return 2;
+    return -1;
+  });
 }
 
 function goaLeadPhrases(): { A: Phrase; B: Phrase; C: Phrase } {
@@ -127,7 +150,7 @@ function writePhrase(
 
 function kickPattern(bar: number, energy: EnergyLevel, lastBarsOfBuild: boolean): NoteEvent[] {
   const out: NoteEvent[] = [];
-  const kickMidi = 24; // C1
+  const kickMidi = 36; // C1
   for (let s = 0; s < 16; s += 4) {
     out.push(note(kickMidi, bar, s, 140, energy >= EnergyLevel.PEAK ? 1 : 0.92));
   }
@@ -317,8 +340,7 @@ export function composeProfessionalTrack(
         writePhrase(groove.ch4_leadA, leadPhrase, bar, root, scale, 36, legato ? 220 : 130, section.leadMode === 'peak' ? 0.92 : 0.82);
       }
       if (leadPhrase && layers.has('ch5_leadB') && (section.leadMode === 'theme' || section.leadMode === 'peak')) {
-        const harmony = leadPhrase.map((d) => (d < 0 ? -1 : d + 2));
-        writePhrase(groove.ch5_leadB, harmony, bar, root, scale, 36, 110, 0.62);
+        writePhrase(groove.ch5_leadB, counterPhrase(leadPhrase), bar, root, scale, 36, 180, 0.7);
       }
       if (layers.has('ch6_arpA') && section.energy >= EnergyLevel.HIGH) {
         groove.ch6_arpA.push(...arpPattern(bar, root, scale, leadPhrase || phrases.A));
@@ -367,11 +389,11 @@ export function composeMusicalLoop(
     else if (r.includes('ACID')) out.push(...acidLine(bar, root, scale, complexity === 'COMPLEX'));
     else if (r.includes('ARP')) out.push(...arpPattern(bar, root, scale, phrases.A));
     else {
-      const cycle = [phrases.A, phrases.A, phrases.B, phrases.C];
-      writePhrase(out, cycle[bar], bar, root, scale, r.includes('LEADB') ? 36 : 36, complexity === 'SIMPLE' ? 200 : 130, 0.85);
-      if (r.includes('LEADB')) {
-        writePhrase(out, cycle[bar].map((d) => (d < 0 ? -1 : d + 2)), bar, root, scale, 36, 110, 0.6);
-      }
+      const bank = phrasesForGenre(String(genre));
+      const cycle = channel === 'ch5_leadB'
+        ? [counterPhrase(bank.A), counterPhrase(bank.B), bank.C, counterPhrase(bank.A)]
+        : [bank.A, bank.A, bank.B, bank.C];
+      writePhrase(out, cycle[bar], bar, root, scale, 36, complexity === 'SIMPLE' ? 220 : 150, 0.86);
     }
   }
   return out;

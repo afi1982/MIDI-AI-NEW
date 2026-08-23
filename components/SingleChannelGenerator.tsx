@@ -122,7 +122,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         }
         setAudioError(null);
         try {
-            await loopPreviewPlayer.play(notes, paramsRef.current.bpm);
+            await loopPreviewPlayer.play(notes, paramsRef.current.bpm, paramsRef.current.channel);
             playingRef.current = true;
             setIsPlaying(true);
         } catch (err: any) {

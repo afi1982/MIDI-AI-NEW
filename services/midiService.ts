@@ -104,48 +104,61 @@ const downloadMetadataReport = (groove: GrooveObject, fileNameBase: string, spec
     setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url); }, 500);
 };
 
+const TRACK_NAMES: Record<string, string> = {
+    ch1_kick: '01 Kick',
+    ch2_sub: '02 Sub Bass',
+    ch3_midBass: '03 Mid Bass',
+    ch4_leadA: '04 Lead A',
+    ch5_leadB: '05 Lead B',
+    ch6_arpA: '06 Arp A',
+    ch7_arpB: '07 Arp B',
+    ch8_snare: '08 Snare',
+    ch9_clap: '09 Clap',
+    ch10_percLoop: '10 Perc Loop',
+    ch11_percTribal: '11 Perc Tribal',
+    ch12_hhClosed: '12 HH Closed',
+    ch13_hhOpen: '13 HH Open',
+    ch14_acid: '14 Acid',
+    ch15_pad: '15 Pad',
+    ch16_synth: '16 Synth FX',
+};
+
+const DRUM_KEYS = new Set<ChannelKey>([
+    'ch1_kick', 'ch8_snare', 'ch9_clap', 'ch10_percLoop', 'ch11_percTribal', 'ch12_hhClosed', 'ch13_hhOpen'
+]);
+
 export const exportMidi = (groove: GrooveObject, selectedChannels?: ChannelKey[]) => {
     try {
-        const tracks: any[] = [];
-        const WRITER_PPQ = 128; 
-        const scale = WRITER_PPQ / INTERNAL_PPQ;
-        const isForensic = groove.id.includes('V116') || groove.id.includes('FORENSIC') || groove.id.includes('IMPORT') || groove.id.includes('LOOP');
-        const totalBars = groove.totalBars || 4;
-        const totalArrangementTicks = totalBars * TICKS_PER_BAR;
-
-        const conductorTrack = new MidiWriter.Track();
-        conductorTrack.addTrackName('Conductor');
-        (conductorTrack as any).setTempo(groove.bpm || 140);
-        const keySig = getKeySignatureData(groove.key || 'C', groove.scale || 'Major');
-        try { (conductorTrack as any).addEvent(new (MidiWriter as any).KeySignatureEvent(keySig.sharps, keySig.isMinor ? 1 : 0)); } catch (e) {}
-        conductorTrack.addEvent(new MidiWriter.NoteEvent({pitch:['C-1'], duration: 'T1', velocity: 0, channel: 1} as any));
-        tracks.push(conductorTrack);
+        const midi = new Midi();
+        midi.header.setTempo(groove.bpm || 145);
 
         ELITE_16_CHANNELS.forEach((channelKey, i) => {
             if (selectedChannels && selectedChannels.length > 0 && !selectedChannels.includes(channelKey)) return;
             const rawEvents = (groove as any)[channelKey] as NoteEvent[];
             if (!rawEvents || rawEvents.length === 0) return;
-            const track = new MidiWriter.Track();
-            track.addTrackName(channelKey);
-            let lastEventEndTickWriter = 0;
-            const validEvents = sanitizeForWriter(rawEvents, isForensic);
-            validEvents.forEach(n => {
-                const startTick480 = n.startTick || 0;
-                const duration480 = n.durationTicks || 120;
-                const startTickWriter = Math.round(startTick480 * scale);
-                const durationWriter = Math.max(1, Math.round(duration480 * scale));
-                let wait = startTickWriter - lastEventEndTickWriter;
-                if (wait < 0) wait = 0;
-                const pitch = Array.isArray(n.note) ? n.note : [n.note];
-                track.addEvent(new MidiWriter.NoteEvent({ pitch: pitch, duration: `T${durationWriter}`, velocity: Math.round((n.velocity || 0.8) * 100), wait: `T${wait}`, channel: i + 1 } as any));
-                lastEventEndTickWriter = startTickWriter + durationWriter;
+
+            const track = midi.addTrack();
+            track.name = TRACK_NAMES[channelKey] || channelKey;
+            track.channel = DRUM_KEYS.has(channelKey) ? 9 : i;
+
+            rawEvents.forEach((n) => {
+                const name = Array.isArray(n.note) ? n.note[0] : n.note;
+                if (!name) return;
+                const midiNum = theoryEngine.getMidiNote(name);
+                if (!Number.isFinite(midiNum)) return;
+                track.addNote({
+                    midi: midiNum,
+                    ticks: Math.max(0, n.startTick || 0),
+                    durationTicks: Math.max(20, n.durationTicks || 120),
+                    velocity: Math.max(0.2, Math.min(1, n.velocity || 0.8)),
+                });
             });
-            tracks.push(track);
         });
-        const write = new MidiWriter.Writer(tracks);
-        return { bytes: write.buildFile(), filename: `${groove.name || 'session'}.mid` };
+
+        const safeName = (groove.name || 'MIDI_AI_Track').replace(/[^\w\- ]+/g, '').trim() || 'MIDI_AI_Track';
+        return { bytes: new Uint8Array(midi.toArray()), filename: `${safeName}.mid` };
     } catch (e: any) {
-        console.error("MIDI Export Error:", e);
+        console.error('MIDI Export Error:', e);
         return { bytes: null, filename: 'error.mid' };
     }
 };
