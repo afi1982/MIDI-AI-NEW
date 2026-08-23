@@ -112,8 +112,8 @@ export function inspectAndHealGroove(groove: GrooveObject, tool: QualityTool = '
   const active = ELITE_16_CHANNELS.filter((ch) => counts[ch] > 0);
 
   checks.push(check('kick', 'Kick present', counts.ch1_kick > 0, counts.ch1_kick ? `${counts.ch1_kick} hits` : 'Missing kick', 'fail'));
-  checks.push(check('sub', 'Sub bass present', counts.ch2_sub > 0, counts.ch2_sub ? `${counts.ch2_sub} notes` : 'Missing sub', 'fail'));
-  checks.push(check('structure', 'Arrangement map', !!(next.structureMap && next.structureMap.length >= 4), next.structureMap ? `${next.structureMap.length} sections` : 'No form', 'fail'));
+  checks.push(check('sub', 'Sub bass present', counts.ch2_sub > 0, counts.ch2_sub ? `${counts.ch2_sub} notes` : 'Missing sub', tool === 'AUDIO_TO_MIDI' ? 'warn' : 'fail'));
+  checks.push(check('structure', 'Arrangement map', !!(next.structureMap && next.structureMap.length >= (tool === 'AUDIO_TO_MIDI' ? 1 : 4)), next.structureMap ? `${next.structureMap.length} sections` : 'No form', tool === 'AUDIO_TO_MIDI' ? 'warn' : 'fail'));
   checks.push(check('length', 'Track length', bars >= 32, `${bars} bars`, 'warn'));
 
   let outOfScale = 0;

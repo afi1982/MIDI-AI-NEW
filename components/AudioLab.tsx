@@ -105,8 +105,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
     const [showSettings, setShowSettings] = useState(true);
     const [pickError, setPickError] = useState<string | null>(null);
     const [genre, setGenre] = useState<MusicGenre>(MusicGenre.PSYTRANCE_FULLON);
-    const [keyName, setKeyName] = useState<string>(MusicalKey.F_SHARP);
-    const [scaleName, setScaleName] = useState<string>(ScaleType.PHRYGIAN);
+    const [keyName, setKeyName] = useState<string>('AUTO');
+    const [scaleName, setScaleName] = useState<string>('AUTO');
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
@@ -133,7 +133,11 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
         setPickError(null);
         setAudioUrl(URL.createObjectURL(file));
         const overrideBpm = !autoBpm && manualBpm > 20 ? manualBpm : undefined;
-        setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm, { genre, key: keyName, scale: scaleName }));
+        setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm, {
+            genre,
+            key: keyName === 'AUTO' ? undefined : keyName,
+            scale: scaleName === 'AUTO' ? undefined : scaleName,
+        }));
     }, [autoBpm, manualBpm, genre, keyName, scaleName]);
 
     const onDrop = useCallback((files: File[]) => {
@@ -245,6 +249,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                 <label className="bg-black/40 p-3 rounded-xl border border-white/5">
                                     <span className="text-[8px] font-black text-gray-500 uppercase">Scale</span>
                                     <select value={scaleName} onChange={(e) => setScaleName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                        <option value="AUTO" className="bg-black">AUTO</option>
                                         {Object.values(ScaleType).map((s) => <option key={s} value={s} className="bg-black">{s}</option>)}
                                     </select>
                                 </label>

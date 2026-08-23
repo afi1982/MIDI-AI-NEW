@@ -1,7 +1,6 @@
-import { ChannelKey, GrooveObject, MusicGenre, NoteEvent } from '../types';
+import { ChannelKey, GrooveObject, MusicGenre, NoteEvent, SectionType, EnergyLevel } from '../types';
 import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
-import { composeProfessionalTrack } from './trackComposer';
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -12,6 +11,7 @@ export interface AudioStemAnalysis {
   scale: string;
   durationSec: number;
   lead: NoteEvent[];
+  harmony: NoteEvent[];
   kickHits: number[];
   hatHits: number[];
   bassNotes: NoteEvent[];
@@ -35,7 +35,7 @@ const ev = (midi: number, startTick: number, durationTicks: number, velocity: nu
     note: theoryEngine.midiToNote(Math.round(midi)),
     time: `${bar}:${beat}:${six}`,
     duration: 'custom',
-    durationTicks: Math.max(40, Math.round(durationTicks)),
+    durationTicks: Math.max(30, Math.round(durationTicks)),
     startTick: Math.max(0, Math.round(startTick)),
     velocity: Math.max(0.25, Math.min(1, velocity)),
   };
@@ -85,23 +85,22 @@ function simpleFlux(samples: Float32Array, hop: number) {
 function estimateBpm(flux: number[], hop: number, sr: number) {
   const hopSec = hop / sr;
   const scores: { bpm: number; s: number }[] = [];
-  for (let bpm = 120; bpm <= 155; bpm++) {
+  for (let bpm = 90; bpm <= 180; bpm++) {
     const lag = 60 / bpm / hopSec;
     if (lag < 2) continue;
     let s = 0;
     const iLag = Math.round(lag);
     for (let i = 0; i + iLag < flux.length; i++) s += flux[i] * flux[i + iLag];
-    const half = Math.round(lag / 2);
-    if (half > 1) {
-      for (let i = 0; i + half < flux.length; i++) s += flux[i] * flux[i + half] * 0.35;
-    }
     scores.push({ bpm, s });
   }
   scores.sort((a, b) => b.s - a.s);
-  return scores[0]?.bpm || 145;
+  let bpm = scores[0]?.bpm || 145;
+  if (bpm < 110) bpm *= 2;
+  if (bpm > 170) bpm = Math.round(bpm / 2);
+  return Math.max(90, Math.min(180, bpm));
 }
 
-function yinHz(frame: Float32Array, sr: number, minF = 110, maxF = 900): number | null {
+function yinHz(frame: Float32Array, sr: number, minF: number, maxF: number): number | null {
   const n = frame.length;
   const minTau = Math.max(2, Math.floor(sr / maxF));
   const maxTau = Math.min(Math.floor(sr / minF), Math.floor(n / 2) - 2);
@@ -123,26 +122,19 @@ function yinHz(frame: Float32Array, sr: number, minF = 110, maxF = 900): number 
     running += d[tau];
     cmnd[tau] = running ? (d[tau] * tau) / running : 1;
   }
-  const threshold = 0.18;
   let tauEst = -1;
+  let best = 1;
   for (let tau = minTau; tau <= maxTau; tau++) {
-    if (cmnd[tau] < threshold) {
+    if (cmnd[tau] < 0.14) {
       while (tau + 1 <= maxTau && cmnd[tau + 1] < cmnd[tau]) tau++;
       tauEst = tau;
+      best = cmnd[tau];
       break;
     }
+    if (cmnd[tau] < best) { best = cmnd[tau]; tauEst = tau; }
   }
-  if (tauEst < 0) {
-    let best = 1;
-    for (let tau = minTau; tau <= maxTau; tau++) {
-      if (cmnd[tau] < best) {
-        best = cmnd[tau];
-        tauEst = tau;
-      }
-    }
-    if (best > 0.45) return null;
-  }
-  const s0 = cmnd[Math.max(0, tauEst - 1)];
+  if (tauEst < 0 || best > 0.4) return null;
+  const s0 = cmnd[Math.max(minTau, tauEst - 1)];
   const s1 = cmnd[tauEst];
   const s2 = cmnd[Math.min(maxTau, tauEst + 1)];
   const denom = 2 * s1 - s2 - s0;
@@ -152,14 +144,60 @@ function yinHz(frame: Float32Array, sr: number, minF = 110, maxF = 900): number 
   return hz;
 }
 
-function yinPitch(frame: Float32Array, sr: number, minF: number, maxF: number): { hz: number; conf: number } | null {
-  const hz = yinHz(frame, sr, minF, maxF);
-  if (!hz) return null;
-  return { hz, conf: 0.82 };
-}
-
 function hzToMidi(hz: number) {
   return 69 + 12 * Math.log2(hz / 440);
+}
+
+/** Harmonic product spectrum — finds the sung/played fundamental, not the bass. */
+function hpsMidi(frame: Float32Array, sr: number, minMidi: number, maxMidi: number): { m: number; s: number } | null {
+  const n = 512;
+  const re = new Float32Array(n);
+  const im = new Float32Array(n);
+  const lim = Math.min(n, frame.length);
+  for (let i = 0; i < lim; i++) re[i] = frame[i] * (0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (lim - 1)));
+  const bits = Math.log2(n);
+  for (let i = 0; i < n; i++) {
+    let j = 0;
+    for (let b = 0; b < bits; b++) if (i & (1 << b)) j |= 1 << (bits - 1 - b);
+    if (j > i) { const t = re[i]; re[i] = re[j]; re[j] = t; }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const half = size >> 1;
+    const step = (Math.PI * 2) / size;
+    for (let i = 0; i < n; i += size) {
+      for (let k = 0; k < half; k++) {
+        const ang = -step * k;
+        const wr = Math.cos(ang);
+        const wi = Math.sin(ang);
+        const ur = re[i + k];
+        const ui = im[i + k];
+        const vr = wr * re[i + k + half] - wi * im[i + k + half];
+        const vi = wr * im[i + k + half] + wi * re[i + k + half];
+        re[i + k] = ur + vr;
+        im[i + k] = ui + vi;
+        re[i + k + half] = ur - vr;
+        im[i + k + half] = ui - vi;
+      }
+    }
+  }
+  const mag = new Float32Array(n / 2);
+  for (let i = 0; i < mag.length; i++) mag[i] = Math.hypot(re[i], im[i]);
+
+  let best = { m: 0, s: 0 };
+  for (let midi = minMidi; midi <= maxMidi; midi += 0.5) {
+    const f = 440 * Math.pow(2, (midi - 69) / 12);
+    let prod = 1;
+    for (let h = 1; h <= 4; h++) {
+      const bin = (f * h * n) / sr;
+      const i0 = Math.floor(bin);
+      if (i0 < 1 || i0 + 1 >= mag.length) { prod = 0; break; }
+      const frac = bin - i0;
+      prod *= mag[i0] * (1 - frac) + mag[i0 + 1] * frac;
+    }
+    if (prod > best.s) best = { m: midi, s: prod };
+  }
+  if (best.s <= 0) return null;
+  return best;
 }
 
 function peakTimes(values: number[], hop: number, sr: number, threshRatio: number) {
@@ -168,7 +206,7 @@ function peakTimes(values: number[], hop: number, sr: number, threshRatio: numbe
   const times: number[] = [];
   for (let i = 2; i < values.length - 2; i++) {
     if (values[i] > thresh && values[i] >= values[i - 1] && values[i] >= values[i + 1]) {
-      if (!times.length || (i * hop) / sr - times[times.length - 1] > 0.08) {
+      if (!times.length || (i * hop) / sr - times[times.length - 1] > 0.07) {
         times.push((i * hop) / sr);
       }
     }
@@ -179,11 +217,11 @@ function peakTimes(values: number[], hop: number, sr: number, threshRatio: numbe
 function chromaKey(midiHist: number[]) {
   const templates: Record<string, number[]> = {
     Minor: [1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0],
-    Phrygian: [1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0],
     Major: [1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1],
     Dorian: [1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0],
+    Phrygian: [1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0],
   };
-  let best = { key: 'F#', scale: 'Phrygian', score: -1 };
+  let best = { key: 'C', scale: 'Minor', score: -1 };
   for (let root = 0; root < 12; root++) {
     for (const [scale, tmpl] of Object.entries(templates)) {
       let s = 0;
@@ -195,25 +233,10 @@ function chromaKey(midiHist: number[]) {
 }
 
 function secToTick(sec: number, bpm: number) {
-  return Math.round((sec * bpm * 480) / 60 / 30) * 30;
+  return Math.round((sec * bpm * 480) / 60 / 15) * 15;
 }
 
-function softSnap(midi: number, key: string, scale: string) {
-  const raw = Math.round(midi);
-  const snapped = theoryEngine.snapMidiToScale(raw, key, scale);
-  return Math.abs(snapped - raw) <= 1 ? snapped : raw;
-}
-
-function trackPitch(
-  samples: Float32Array,
-  sr: number,
-  hop: number,
-  frame: number,
-  minF: number,
-  maxF: number,
-  minMidi: number,
-  maxMidi: number
-) {
+function trackMelodyHps(samples: Float32Array, sr: number, hop: number, frame: number) {
   const out: { t: number; m: number; v: number }[] = [];
   let prev: number | null = null;
   for (let i = 0; i + frame < samples.length; i += hop) {
@@ -221,50 +244,66 @@ function trackPitch(
     let e = 0;
     for (let j = 0; j < win.length; j++) e += win[j] * win[j];
     const rms = Math.sqrt(e / win.length);
-    if (rms < 0.006) { prev = null; continue; }
-    const hit = yinPitch(win, sr, minF, maxF);
-    if (!hit || hit.conf < 0.55) { continue; }
-    let midi = hzToMidi(hit.hz);
+    if (rms < 0.005) { prev = null; continue; }
+    const hit = hpsMidi(win, sr, 55, 88);
+    if (!hit) continue;
+    let midi = hit.m;
     if (prev != null) {
       const down = midi - 12;
       const up = midi + 12;
-      if (Math.abs(down - prev) + 1.2 < Math.abs(midi - prev)) midi = down;
-      else if (Math.abs(up - prev) + 1.2 < Math.abs(midi - prev)) midi = up;
+      if (Math.abs(down - prev) + 1.5 < Math.abs(midi - prev)) midi = down;
+      else if (Math.abs(up - prev) + 1.5 < Math.abs(midi - prev)) midi = up;
+      if (Math.abs(midi - prev) > 8 && hit.s < 1e-6) continue;
     }
-    if (midi < minMidi || midi > maxMidi) continue;
     prev = midi;
-    out.push({ t: i / sr, m: midi, v: Math.min(1, 0.3 + rms * 8) * hit.conf });
+    out.push({ t: i / sr, m: midi, v: Math.min(1, 0.35 + rms * 7) });
   }
-  if (out.length < 5) return out;
-  const smooth = out.map((p, i) => {
+  if (out.length < 6) return out;
+  return out.map((p, i) => {
     const a = out[Math.max(0, i - 2)].m;
-    const b = out[i].m;
+    const b = p.m;
     const c = out[Math.min(out.length - 1, i + 2)].m;
     return { ...p, m: [a, b, c].sort((x, y) => x - y)[1] };
   });
-  return smooth;
 }
 
-function contourToNotes(
-  frames: { t: number; m: number; v: number }[],
-  bpm: number,
-  key: string,
-  scale: string
-): NoteEvent[] {
+function trackBassYin(samples: Float32Array, sr: number, hop: number, frame: number) {
+  const out: { t: number; m: number; v: number }[] = [];
+  let prev: number | null = null;
+  for (let i = 0; i + frame < samples.length; i += hop) {
+    const win = samples.subarray(i, i + frame);
+    let e = 0;
+    for (let j = 0; j < win.length; j++) e += win[j] * win[j];
+    const rms = Math.sqrt(e / win.length);
+    if (rms < 0.008) { prev = null; continue; }
+    const hz = yinHz(win, sr, 40, 220);
+    if (!hz) continue;
+    let midi = hzToMidi(hz);
+    if (prev != null) {
+      const down = midi - 12;
+      if (Math.abs(down - prev) + 1 < Math.abs(midi - prev)) midi = down;
+    }
+    if (midi < 24 || midi > 52) continue;
+    prev = midi;
+    out.push({ t: i / sr, m: midi, v: Math.min(1, 0.4 + rms * 6) });
+  }
+  return out;
+}
+
+function contourToNotes(frames: { t: number; m: number; v: number }[], bpm: number): NoteEvent[] {
   if (!frames.length) return [];
   const notes: NoteEvent[] = [];
   let start = frames[0];
   let last = frames[0];
   const flush = () => {
-    const hold = last.t - start.t + 0.04;
-    if (hold < 0.06) return;
-    const midi = softSnap((start.m + last.m) * 0.5, key, scale);
-    notes.push(ev(midi, secToTick(start.t, bpm), (hold * bpm * 480) / 60, last.v));
+    const hold = last.t - start.t + hopGuess(frames);
+    if (hold < 0.055) return;
+    notes.push(ev(Math.round((start.m + last.m) * 0.5), secToTick(start.t, bpm), (hold * bpm * 480) / 60, last.v));
   };
   for (let i = 1; i < frames.length; i++) {
     const cur = frames[i];
-    const same = Math.abs(cur.m - last.m) < 0.7;
-    const close = cur.t - last.t < 0.12;
+    const same = Math.abs(cur.m - last.m) < 0.55;
+    const close = cur.t - last.t < 0.11;
     if (same && close) last = cur;
     else {
       flush();
@@ -276,17 +315,18 @@ function contourToNotes(
   return notes;
 }
 
+function hopGuess(frames: { t: number }[]) {
+  if (frames.length < 2) return 0.04;
+  return Math.max(0.03, Math.min(0.06, frames[1].t - frames[0].t));
+}
+
 function buildKickMask(hits: number[], bpm: number) {
   const stepSec = 60 / bpm / 4;
   const hist = new Array(16).fill(0);
-  hits.forEach((t) => {
-    hist[Math.round(t / stepSec) % 16] += 1;
-  });
+  hits.forEach((t) => { hist[Math.round(t / stepSec) % 16] += 1; });
   const max = Math.max(1, ...hist);
   const mask = hist.map((h) => (h >= max * 0.28 ? 1 : 0));
-  if (mask[0] + mask[4] + mask[8] + mask[12] < 2) {
-    return [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
-  }
+  if (mask[0] + mask[4] + mask[8] + mask[12] < 2) return [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
   return mask;
 }
 
@@ -311,7 +351,7 @@ export async function analyzeSongToStems(
         return m;
       })()
     : decoded.getChannelData(0);
-  const take = Math.min(src.length, Math.floor(decoded.sampleRate * 150));
+  const take = Math.min(src.length, Math.floor(decoded.sampleRate * 180));
   const slice = src.subarray(0, take);
   const sr = 16000;
   const mono = downsample(slice, decoded.sampleRate, sr);
@@ -322,35 +362,39 @@ export async function analyzeSongToStems(
   onProgress?.(40);
   const low = applyBand(mono, sr, 30, 180);
   const high = applyBand(mono, sr, 5000, 9000);
-  const mid = applyBand(mono, sr, 220, 2800);
+  const leadBand = applyBand(mono, sr, 280, 3200);
   const lowFlux = simpleFlux(low, hop);
   const highFlux = simpleFlux(high, hop);
-  const kickHits = peakTimes(lowFlux, hop, sr, 1.7);
-  const hatHits = peakTimes(highFlux, hop, sr, 1.35);
+  const kickHits = peakTimes(lowFlux, hop, sr, 1.65);
+  const hatHits = peakTimes(highFlux, hop, sr, 1.3);
   const kickMask = buildKickMask(kickHits, detectedBpm);
   onProgress?.(55);
 
   const frame = 1024;
   const hopP = 320;
-  const midis = trackPitch(mid, sr, hopP, frame, 196, 1200, 55, 91);
-  const bassFrames = trackPitch(low, sr, hopP, frame, 40, 200, 24, 50);
+  const midis = trackMelodyHps(leadBand, sr, hopP, frame);
+  const bassFrames = trackBassYin(low, sr, hopP, frame);
   const hist = new Array(12).fill(0);
-  midis.forEach((p) => { hist[Math.round(p.m) % 12] += p.v; });
+  midis.forEach((p) => { hist[((Math.round(p.m) % 12) + 12) % 12] += p.v; });
   const guessed = chromaKey(hist);
   const key = override?.key || guessed.key;
   const scale = override?.scale || guessed.scale;
-  onProgress?.(72);
+  onProgress?.(74);
 
-  const lead = contourToNotes(midis, detectedBpm, key, scale);
-  const bassNotes = contourToNotes(bassFrames, detectedBpm, key, scale).map((n) => {
+  const lead = contourToNotes(midis, detectedBpm);
+  const harmony = lead.filter((n) => (n.durationTicks || 0) >= 360).map((n) => {
+    const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+    return ev(m + 7, n.startTick || 0, n.durationTicks || 360, 0.32);
+  });
+  const bassNotes = contourToNotes(bassFrames, detectedBpm).map((n) => {
     let m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
     while (m > 43) m -= 12;
     while (m < 24) m += 12;
-    return ev(m, n.startTick || 0, Math.min(280, n.durationTicks || 120), 0.84);
+    return ev(m, n.startTick || 0, Math.min(320, n.durationTicks || 120), 0.86);
   });
 
   await ctx.close();
-  onProgress?.(84);
+  onProgress?.(86);
   return {
     bpm: targetBpm,
     sourceBpm: detectedBpm,
@@ -358,6 +402,7 @@ export async function analyzeSongToStems(
     scale,
     durationSec: decoded.duration,
     lead,
+    harmony,
     kickHits,
     hatHits,
     bassNotes,
@@ -365,151 +410,95 @@ export async function analyzeSongToStems(
     detected: {
       ch1_kick: kickHits.length,
       ch2_sub: bassNotes.length,
-      ch3_midBass: bassNotes.length,
       ch4_leadA: lead.length,
-      ch8_snare: Math.round(kickHits.length * 0.4),
+      ch5_leadB: harmony.length,
       ch12_hhClosed: hatHits.length,
-      ch13_hhOpen: Math.round(hatHits.length * 0.2),
-      ch15_pad: lead.length ? 1 : 0,
     },
   };
 }
 
 export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: ArrangeOptions): GrooveObject {
   const bpm = options.bpm && options.bpm > 40 ? options.bpm : analysis.bpm;
-  const key = options.key || analysis.key;
-  const scale = options.scale || analysis.scale;
+  const key = analysis.key;
+  const scale = analysis.scale;
   const sourceBpm = Math.max(80, analysis.sourceBpm || analysis.bpm || bpm);
   const tickScale = bpm / sourceBpm;
-  const lastLead = analysis.lead.reduce((m, n) => Math.max(m, (n.startTick || 0) + (n.durationTicks || 0)), 0);
-  const totalBars = Math.min(96, Math.max(16, Math.ceil((lastLead * tickScale) / 1920) + 2));
-  const minutes = (totalBars * 4) / Math.max(80, bpm);
-  const groove = composeProfessionalTrack(
-    { bpm, key, scale, genre: options.genre, trackName: options.trackName || `From Audio · ${key} ${scale}` },
-    minutes,
-    [...ELITE_16_CHANNELS]
+  const lastTickSrc = Math.max(
+    analysis.lead.reduce((m, n) => Math.max(m, (n.startTick || 0) + (n.durationTicks || 0)), 0),
+    analysis.bassNotes.reduce((m, n) => Math.max(m, (n.startTick || 0) + (n.durationTicks || 0)), 0),
+    Math.round((analysis.durationSec || 0) * sourceBpm * 480 / 60)
+  );
+  const totalBars = Math.min(128, Math.max(8, Math.ceil((lastTickSrc * tickScale) / 1920) + 1));
+
+  const groove: any = {
+    id: `A2M-${Date.now()}`,
+    name: options.trackName || `From Audio · ${key} ${scale}`,
+    bpm,
+    key,
+    scale,
+    genre: options.genre,
+    totalBars,
+    structureMap: [{
+      type: SectionType.DROP,
+      startBar: 0,
+      durationBars: totalBars,
+      energy: EnergyLevel.PEAK,
+      activeInstruments: [...ELITE_16_CHANNELS],
+    }],
+    meta: { architecture: '1:1 source transcription', sourceBpm, leadNotes: analysis.lead.length },
+  };
+  ELITE_16_CHANNELS.forEach((ch) => { groove[ch] = []; });
+
+  const place = (n: NoteEvent, extraVel = 0) => ev(
+    theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note),
+    Math.round((n.startTick || 0) * tickScale),
+    Math.max(40, Math.round((n.durationTicks || 120) * tickScale)),
+    Math.min(1, (n.velocity || 0.8) + extraVel)
   );
 
-  const place = (n: NoteEvent, extraVel = 0) => {
-    const midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-    return ev(
-      midi,
-      Math.round((n.startTick || 0) * tickScale),
-      Math.max(50, Math.round((n.durationTicks || 160) * tickScale)),
-      Math.min(1, (n.velocity || 0.8) + extraVel)
-    );
-  };
-
-  const extracted = analysis.lead.map((n) => place(n, 0.1));
-  groove.ch4_leadA = extracted
-    .filter((n) => (n.startTick || 0) < totalBars * 1920)
-    .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
-
-  groove.ch5_leadB = groove.ch4_leadA
-    .filter((n) => (n.durationTicks || 0) >= 240)
-    .map((n) => {
-      const m = softSnap(theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) + 7, key, scale);
-      return ev(m, n.startTick || 0, n.durationTicks || 240, 0.36);
-    });
-
-  const intervals = theoryEngine.getScaleIntervals(scale);
-  const root = theoryEngine.getMidiNote(`${key}3`);
-  const motif = extracted.slice(0, 8).map((n) => {
-    const pc = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) % 12;
-    let best = 0;
-    let dist = 12;
-    intervals.forEach((iv, i) => {
-      const d = Math.min((pc - ((root + iv) % 12) + 12) % 12, (((root + iv) % 12) - pc + 12) % 12);
-      if (d < dist) { dist = d; best = i; }
-    });
-    return best;
-  });
-  if (!motif.length) motif.push(0, 2, 3, 5);
-
-  const fillBars = (write: (bar: number) => NoteEvent[]) => {
-    const out: NoteEvent[] = [];
-    for (let bar = 0; bar < totalBars; bar++) out.push(...write(bar));
-    return out;
-  };
-
-  groove.ch6_arpA = fillBars((bar) => {
-    if (bar % 16 < 4) return [];
-    return [0, 4, 8, 12].map((s, i) => ev(root + 12 + intervals[motif[(i + bar) % motif.length] % intervals.length], bar * 1920 + s * 120, 100, 0.45));
-  });
-  groove.ch7_arpB = fillBars((bar) => {
-    if (bar % 16 < 8) return [];
-    return [2, 6, 10, 14].map((s, i) => ev(root + 24 + intervals[motif[(i + 2) % motif.length] % intervals.length], bar * 1920 + s * 120, 80, 0.38));
-  });
-  groove.ch14_acid = fillBars((bar) => {
-    if (bar % 8 === 0) return [];
-    return [1, 3, 5, 7, 9, 11, 13, 15].map((s, i) => ev(root - 12 + intervals[motif[i % motif.length] % intervals.length], bar * 1920 + s * 120, 50, 0.55));
-  });
-  groove.ch16_synth = fillBars((bar) => {
-    if (bar % 16 !== 15 && bar % 16 !== 7) return [];
-    return [ev(root + 36 + intervals[0], bar * 1920, 480, 0.4)];
-  });
-  groove.ch11_percTribal = fillBars((bar) => {
-    if (bar < 8) return [];
-    return [1, 7, 11].map((s) => ev(62, bar * 1920 + s * 120, 50, 0.4));
-  });
-  groove.ch10_percLoop = fillBars((bar) => {
-    if (bar % 4 === 3) return [3, 10, 14].map((s) => ev(60, bar * 1920 + s * 120, 40, 0.35));
-    return [];
-  });
-  groove.ch13_hhOpen = fillBars((bar) => (bar % 2 === 1 ? [ev(46, bar * 1920 + 14 * 120, 80, 0.45)] : []));
-  groove.ch9_clap = fillBars((bar) => (bar >= 8 ? [ev(39, bar * 1920 + 4 * 120, 80, 0.6), ev(39, bar * 1920 + 12 * 120, 80, 0.55)] : []));
-
-  const mask = analysis.kickMask?.length === 16 ? analysis.kickMask : [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
-  const kickBars = totalBars;
-  const styledKick: NoteEvent[] = [];
-  for (let bar = 0; bar < kickBars; bar++) {
-    mask.forEach((on, step) => {
-      if (!on) return;
-      styledKick.push(ev(36, bar * 1920 + step * 120, step % 4 === 0 ? 140 : 50, step % 4 === 0 ? 1 : 0.45));
-    });
-  }
-  if (styledKick.length) groove.ch1_kick = styledKick;
-
-  const bassSrc = (analysis.bassNotes.length ? analysis.bassNotes : extracted).map((n) => place(n));
-  if (bassSrc.length) {
-    groove.ch2_sub = bassSrc.map((n) => {
-      let m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-      while (m > 43) m -= 12;
-      while (m < 24) m += 12;
-      return ev(m, n.startTick || 0, Math.min(240, n.durationTicks || 120), 0.84);
-    }).filter((n) => (n.startTick || 0) < totalBars * 1920);
-  }
-
   const lastTick = totalBars * 1920;
-  ELITE_16_CHANNELS.forEach((ch) => {
-    const notes = (((groove as any)[ch] || []) as NoteEvent[])
-      .filter((n) => (n.startTick || 0) < lastTick)
-      .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
-    if (ch === 'ch4_leadA' || ch === 'ch2_sub') {
-      (groove as any)[ch] = notes.slice(0, 1200);
-      return;
-    }
-    (groove as any)[ch] = notes.slice(0, ch.includes('kick') ? 600 : 220);
+  groove.ch4_leadA = analysis.lead.map((n) => place(n, 0.12)).filter((n) => (n.startTick || 0) < lastTick);
+  groove.ch5_leadB = (analysis.harmony || []).map((n) => place(n)).filter((n) => (n.startTick || 0) < lastTick);
+  groove.ch2_sub = analysis.bassNotes.map((n) => place(n)).filter((n) => (n.startTick || 0) < lastTick);
+  groove.ch3_midBass = groove.ch2_sub.map((n: NoteEvent) => {
+    const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) + 12;
+    return ev(m, n.startTick || 0, Math.min(200, n.durationTicks || 120), 0.45);
   });
-  groove.totalBars = totalBars;
 
-  groove.meta = {
-    ...(groove.meta || {}),
-    architecture: 'Full-song melody transcription',
-    sourceBpm: analysis.sourceBpm || analysis.bpm,
-    detectedChannels: analysis.detected,
-    leadNotes: analysis.lead.length,
-  };
+  analysis.kickHits.forEach((sec) => {
+    const tick = Math.round(sec * bpm * 480 / 60 / 30) * 30;
+    if (tick < lastTick) groove.ch1_kick.push(ev(36, tick, 140, 1));
+  });
+  if (!groove.ch1_kick.length) {
+    const mask = analysis.kickMask?.length === 16 ? analysis.kickMask : [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+    for (let bar = 0; bar < totalBars; bar++) {
+      mask.forEach((on, step) => {
+        if (on) groove.ch1_kick.push(ev(36, bar * 1920 + step * 120, 140, 1));
+      });
+    }
+  }
+
+  analysis.hatHits.forEach((sec) => {
+    const tick = Math.round(sec * bpm * 480 / 60 / 60) * 60;
+    if (tick < lastTick) groove.ch12_hhClosed.push(ev(42, tick, 40, 0.55));
+  });
+
+  const longPads = groove.ch4_leadA.filter((n: NoteEvent) => (n.durationTicks || 0) >= 480).slice(0, 80);
+  groove.ch15_pad = longPads.map((n: NoteEvent) => {
+    const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) - 12;
+    return ev(m, n.startTick || 0, n.durationTicks || 480, 0.28);
+  });
+
   groove.analysisMeta = {
-    detectedBpm: analysis.bpm,
+    detectedBpm: analysis.sourceBpm || analysis.bpm,
     usedBpm: bpm,
     detectedKey: `${analysis.key} ${analysis.scale}`,
     usedKey: `${key} ${scale}`,
     durationSec: analysis.durationSec,
     channels: analysis.detected,
-    kickMask: mask,
+    mode: '1:1 transcription',
   };
-  return groove;
+  return groove as GrooveObject;
 }
 
 export async function decodeIfAudio(file: File): Promise<boolean> {
