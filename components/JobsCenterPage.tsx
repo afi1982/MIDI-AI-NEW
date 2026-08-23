@@ -4,6 +4,7 @@ import { jobQueueService, Job } from '../services/jobQueueService';
 import { GrooveObject } from '../types';
 import { Activity, CheckCircle, AlertTriangle, Loader2, Download, Trash2, ArrowRight, Zap, Waves, FileAudio } from 'lucide-react';
 import { downloadFullArrangementMidi } from '../services/midiService';
+import { QualityReportCard } from './QualityReportCard';
 
 interface JobsCenterPageProps {
     onOpenGroove: (groove: GrooveObject) => void;
@@ -36,7 +37,8 @@ const JobRow: React.FC<{ job: Job, onOpen: (g: GrooveObject) => void, onCancel: 
     };
 
     return (
-        <div className="bg-[#111] border border-white/5 rounded-xl p-3 md:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 group hover:border-white/10 transition-all">
+        <div className="bg-[#111] border border-white/5 rounded-xl p-3 md:p-4 flex flex-col gap-3 group hover:border-white/10 transition-all">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-3 md:gap-4">
                 <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center border shrink-0 ${
                     job.status === 'COMPLETED' ? 'bg-green-900/20 border-green-500/30 text-green-500' :
@@ -98,6 +100,8 @@ const JobRow: React.FC<{ job: Job, onOpen: (g: GrooveObject) => void, onCancel: 
                     </button>
                 )}
             </div>
+        </div>
+        {job.quality && <QualityReportCard report={job.quality} compact={false} />}
         </div>
     );
 };

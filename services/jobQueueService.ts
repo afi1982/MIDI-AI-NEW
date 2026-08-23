@@ -6,6 +6,7 @@ import { analyzeAudioChunk, sliceAudio } from './audioAnalysisService';
 import { forensicFixerService } from './forensicFixerService';
 import { contextBridge } from './contextBridgeService';
 import { midiRendererService, RenderProfile } from './midiRendererService';
+import { inspectAndHealGroove, inspectAudioBlob, QualityReport } from './qualityGateService';
 
 export type JobType = 'MIDI_GENERATION' | 'AUDIO_REGRESSION' | 'FORENSIC_ANALYSIS' | 'FORENSIC_STUDY' | 'MELODY_ARCHITECT' | 'MIDI_RENDER';
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -20,6 +21,7 @@ export interface Job {
     payload: any;
     result?: any;
     error?: string;
+    quality?: QualityReport;
 }
 
 class JobQueueService {
@@ -148,12 +150,11 @@ class JobQueueService {
         const { params, channels } = job.payload;
         job.progress = 25; this.notify();
         const res = await maestroService.generateGroove(params, params.trackLengthMinutes, channels);
-        job.progress = 80; this.notify();
-        try {
-            job.result = await forensicFixerService.auditAndHeal(res);
-        } catch {
-            job.result = res;
-        }
+        job.progress = 70; this.notify();
+        const gated = inspectAndHealGroove(res, 'TRACK');
+        job.quality = gated.report;
+        job.result = gated.groove;
+        job.name = `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · Track`;
     }
 
     private async runAudioJob(job: Job) {
@@ -196,6 +197,9 @@ class JobQueueService {
             (master as any)[ch] = segments.flatMap(seg => (seg as any)[ch] || []);
         });
         job.result = master;
+        try {
+            job.quality = inspectAndHealGroove(master, 'AUDIO_TO_MIDI').report;
+        } catch {}
     }
 
     private async runForensicStudyJob(job: Job) {
@@ -234,10 +238,12 @@ class JobQueueService {
     private async runRenderJob(job: Job) {
         const { file, profile } = job.payload;
         const blob = await midiRendererService.renderToWav(file, profile, (p) => {
-            job.progress = Math.round(p);
+            job.progress = Math.round(p * 0.9);
             this.notify();
         });
+        job.quality = await inspectAudioBlob(blob);
         job.result = blob;
+        job.name = `${job.quality.passed ? 'QA PASS' : 'QA CHECK'} ${job.quality.score} · Render`;
     }
 
     public clearCompleted() {

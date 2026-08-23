@@ -1,4 +1,3 @@
-
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
 
@@ -8,46 +7,92 @@ export interface RenderProfile {
     engine: 'ELECTRONIC' | 'HARDWARE' | 'GENERAL';
 }
 
+function isDrumTrack(track: any) {
+    const name = String(track.name || '').toLowerCase();
+    return track.channel === 9 || track.instrument?.percussion || /kick|snare|clap|hat|hh|perc|drum/.test(name);
+}
+
+function isKickNote(midi: number, name: string) {
+    return midi <= 36 || /kick/.test(name);
+}
+
+function isHatNote(midi: number, name: string) {
+    return midi === 42 || midi === 44 || midi === 46 || /hh|hat/.test(name);
+}
+
 class MidiRendererService {
-    /**
-     * Renders a MIDI file to a professional high-quality WAV Blob.
-     * Uses faster-than-realtime OfflineAudioContext.
-     */
     public async renderToWav(midiFile: File, profile: RenderProfile, onProgress: (p: number) => void): Promise<Blob> {
         const arrayBuffer = await midiFile.arrayBuffer();
         const midi = new Midi(arrayBuffer);
         const bpm = midi.header.tempos[0]?.bpm || 140;
-        const durationSeconds = midi.duration + 2.5;
+        const durationSeconds = Math.max(2, midi.duration + 2);
 
-        let interval: any;
+        let interval: ReturnType<typeof setInterval> | undefined;
 
         const buffer = await Tone.Offline(async (context) => {
             context.transport.bpm.value = bpm;
-            const masterLimiter = new Tone.Limiter(-1).toDestination();
-            const masterCompressor = new Tone.Compressor({
-                threshold: -18,
-                ratio: 3.5,
-                attack: 0.005,
-                release: 0.2
-            }).connect(masterLimiter);
+            const limiter = new Tone.Limiter(-1.2).toDestination();
+            const master = new Tone.Compressor({ threshold: -16, ratio: 3, attack: 0.01, release: 0.18 }).connect(limiter);
+            const reverb = new Tone.Reverb({ decay: 2.2, wet: 0.12 }).connect(master);
+            await reverb.generate();
 
-            for (const track of midi.tracks) {
-                if (track.notes.length === 0) continue;
-                const instrument = this.createInstrumentForTrack(track, profile, masterCompressor);
-                const sortedNotes = [...track.notes].sort((a, b) => a.time - b.time);
-                sortedNotes.forEach(note => {
-                    instrument.triggerAttackRelease(note.name, note.duration, note.time, note.velocity);
-                });
-            }
+            midi.tracks.forEach((track) => {
+                if (!track.notes.length) return;
+                const name = String(track.name || '');
+                const drums = isDrumTrack(track);
+                const bass = !drums && track.notes.every((n) => n.midi < 52);
+                const pad = /pad|atmos/.test(name.toLowerCase());
 
-            let lastReportedProgress = 0;
-            interval = setInterval(() => {
-                const p = Math.round((context.currentTime / durationSeconds) * 90);
-                if (p > lastReportedProgress) {
-                    onProgress(p);
-                    lastReportedProgress = p;
+                if (drums) {
+                    const kick = new Tone.MembraneSynth({
+                        pitchDecay: 0.05, octaves: 5,
+                        envelope: { attack: 0.001, decay: 0.36, sustain: 0, release: 0.12 },
+                    }).connect(master);
+                    kick.volume.value = -3;
+                    const snare = new Tone.NoiseSynth({
+                        envelope: { attack: 0.001, decay: 0.16, sustain: 0 },
+                    }).connect(master);
+                    snare.volume.value = -10;
+                    const hat = new Tone.MetalSynth({
+                        envelope: { attack: 0.001, decay: 0.07, release: 0.02 },
+                        harmonicity: 5.1, modulationIndex: 20, resonance: 2800, octaves: 1.1,
+                    }).connect(master);
+                    hat.volume.value = -18;
+
+                    track.notes.forEach((note) => {
+                        if (isKickNote(note.midi, name)) kick.triggerAttackRelease('C1', '8n', note.time, note.velocity);
+                        else if (isHatNote(note.midi, name)) hat.triggerAttackRelease('32n', note.time, note.velocity);
+                        else snare.triggerAttackRelease('16n', note.time, note.velocity);
+                    });
+                    return;
                 }
-            }, 100);
+
+                if (bass) {
+                    const synth = new Tone.PolySynth(Tone.Synth, {
+                        oscillator: { type: 'sawtooth' },
+                        envelope: { attack: 0.004, decay: 0.14, sustain: 0.18, release: 0.08 },
+                    }).connect(master);
+                    synth.volume.value = -7;
+                    track.notes.forEach((note) => synth.triggerAttackRelease(note.name, Math.max(0.05, note.duration), note.time, note.velocity));
+                    return;
+                }
+
+                const dest = pad ? reverb : master;
+                const synth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: profile.engine === 'HARDWARE' ? 'square' : pad ? 'sine' : 'fatsawtooth' },
+                    envelope: pad
+                        ? { attack: 0.18, decay: 0.3, sustain: 0.65, release: 0.9 }
+                        : { attack: 0.012, decay: 0.12, sustain: 0.32, release: 0.28 },
+                }).connect(dest);
+                synth.volume.value = pad ? -12 : -8;
+                track.notes.forEach((note) => synth.triggerAttackRelease(note.name, Math.max(0.05, note.duration), note.time, note.velocity));
+            });
+
+            let last = 0;
+            interval = setInterval(() => {
+                const p = Math.min(90, Math.round((context.currentTime / durationSeconds) * 90));
+                if (p > last) { onProgress(p); last = p; }
+            }, 80);
         }, durationSeconds);
 
         if (interval) clearInterval(interval);
@@ -55,46 +100,13 @@ class MidiRendererService {
         return this.encodeWav(buffer.get());
     }
 
-    private createInstrumentForTrack(track: any, profile: RenderProfile, dest: Tone.ToneAudioNode): any {
-        const isDrums = track.channel === 9 || track.instrument.percussion;
-        const isBass = (track.notes.some((n: any) => n.midi < 45) && !isDrums);
-        
-        // We use PolySynth as a wrapper for Synth to ensure overlaps don't crash the renderer
-        if (profile.engine === 'ELECTRONIC') {
-            const dist = new Tone.Distortion(0.05).connect(dest);
-            const lowPass = new Tone.Filter(4000, "lowpass").connect(dist);
-
-            if (isBass) {
-                return new Tone.PolySynth(Tone.Synth, {
-                    oscillator: { type: "sawtooth" },
-                    envelope: { attack: 0.001, decay: 0.2, sustain: 0.2, release: 0.1 },
-                    volume: -6
-                }).connect(lowPass);
-            }
-            return new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: "fatsawtooth", count: 3, spread: 20 },
-                envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.6 }
-            }).connect(lowPass);
-        }
-
-        if (profile.engine === 'HARDWARE') {
-            const chorus = new Tone.Chorus(4, 2, 0.5).start().connect(dest);
-            return new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: "square" },
-                envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 0.4 }
-            }).connect(chorus);
-        }
-
-        return new Tone.PolySynth(Tone.Synth).connect(dest);
-    }
-
     private encodeWav(buffer: AudioBuffer): Blob {
         const numOfChan = buffer.numberOfChannels;
         const length = buffer.length * numOfChan * 2 + 44;
         const bufferData = new ArrayBuffer(length);
         const view = new DataView(bufferData);
-        const channels = [];
-        let i, sample, offset = 0;
+        const channels: Float32Array[] = [];
+        let offset = 0;
 
         const writeString = (s: string) => {
             for (let j = 0; j < s.length; j++) view.setUint8(offset + j, s.charCodeAt(j));
@@ -115,17 +127,15 @@ class MidiRendererService {
         writeString('data');
         view.setUint32(offset, length - offset - 4, true); offset += 4;
 
-        for (i = 0; i < numOfChan; i++) channels.push(buffer.getChannelData(i));
-
-        for (i = 0; i < buffer.length; i++) {
+        for (let i = 0; i < numOfChan; i++) channels.push(buffer.getChannelData(i));
+        for (let i = 0; i < buffer.length; i++) {
             for (let channel = 0; channel < numOfChan; channel++) {
-                sample = Math.max(-1, Math.min(1, channels[channel][i]));
+                let sample = Math.max(-1, Math.min(1, channels[channel][i]));
                 sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
                 view.setInt16(offset, sample, true);
                 offset += 2;
             }
         }
-
         return new Blob([view], { type: 'audio/wav' });
     }
 }

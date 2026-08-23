@@ -9,6 +9,8 @@ import { ComplexityLevel } from '../services/melodicComposer';
 import { engineProfileService, resolveGenreId } from '../services/engineProfileService';
 import { referenceStorageService } from '../services/referenceStorageService';
 import { loopPreviewPlayer } from '../services/loopPreviewPlayer';
+import { inspectAndHealLoop, QualityReport } from '../services/qualityGateService';
+import { QualityReportCard } from './QualityReportCard';
 
 interface SingleChannelGeneratorProps {
     onClose: () => void;
@@ -83,6 +85,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
     const [isPlaying, setIsPlaying] = useState(false);
     const [loopVersion, setLoopVersion] = useState(1);
     const [audioError, setAudioError] = useState<string | null>(null);
+    const [quality, setQuality] = useState<QualityReport | null>(null);
 
     const notesRef = useRef<NoteEvent[]>([]);
     const playingRef = useRef(false);
@@ -140,6 +143,16 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         await playNotes(notesRef.current);
     };
 
+    const commitGenerated = (notes: NoteEvent[], meta: GenerationMetadata, ch: ChannelKey, k: string, sc: string) => {
+        const gated = inspectAndHealLoop(notes, ch, k, sc);
+        notesRef.current = gated.notes;
+        setGeneratedNotes(gated.notes);
+        setGenMeta(meta);
+        setQuality(gated.report);
+        setLoopVersion(v => v + 1);
+        return gated.notes;
+    };
+
     const handleNewGeneration = (currentMask?: number[], motifOverride?: number[]) => {
         const wasPlaying = playingRef.current;
         stopPlayback();
@@ -151,11 +164,8 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
             setSessionMotif(newMotif);
         }
         const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, newMotif, mask, genre);
-        notesRef.current = notes;
-        setGeneratedNotes(notes);
-        setGenMeta(meta);
-        setLoopVersion(v => v + 1);
-        if (wasPlaying) void playNotes(notes);
+        const healed = commitGenerated(notes, meta, channel, key, scale);
+        if (wasPlaying) void playNotes(healed);
     };
 
     useEffect(() => {
@@ -165,9 +175,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         const motif = melodicComposer.createMotif(16, 7, genre, engineProfile);
         setSessionMotif(motif);
         const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpm, key, scale, complexity, motif, glue, genre);
-        notesRef.current = notes;
-        setGeneratedNotes(notes);
-        setGenMeta(meta);
+        commitGenerated(notes, meta, channel, key, scale);
         return () => { stopPlayback(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -186,10 +194,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         const motif = melodicComposer.createMotif(16, 7, newGenre, engineProfile);
         setSessionMotif(motif);
         const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(channel, bpmNow, key, scale, complexity, motif, sessionRhythmMask, newGenre);
-        notesRef.current = notes;
-        setGeneratedNotes(notes);
-        setGenMeta(meta);
-        setLoopVersion(v => v + 1);
+        commitGenerated(notes, meta, channel, key, scale);
     };
 
     const applyParamChange = (next: { channel?: ChannelKey; key?: string; scale?: string; complexity?: ComplexityLevel }) => {
@@ -203,10 +208,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
         if (next.complexity) { stopPlayback(); setComplexity(next.complexity); }
         const motif = sessionMotif || melodicComposer.createMotif(16, 7, genre, getSmartEngineProfile(genre));
         const { notes, meta } = maestroService.generateSingle4BarLoopWithMeta(nextChannel, bpm, nextKey, nextScale, nextComplexity, motif, sessionRhythmMask, genre);
-        notesRef.current = notes;
-        setGeneratedNotes(notes);
-        setGenMeta(meta);
-        setLoopVersion(v => v + 1);
+        commitGenerated(notes, meta, nextChannel, nextKey, nextScale);
     };
 
     const handleManualRegenerate = () => {
