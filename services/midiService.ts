@@ -1,7 +1,6 @@
 
 import { Midi } from '@tonejs/midi';
 import { GrooveObject, NoteEvent, ChannelKey, ScaleType } from '../types.ts';
-import MidiWriter from 'midi-writer-js'; 
 import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
 import { engineProfileService, getEngineStats } from './engineProfileService';
@@ -36,30 +35,6 @@ const getKeySignatureData = (root: string, scale: string): { sharps: number, isM
     const totalSharps = baseSharps + modeOffset;
     const isMinorLike = cleanScale.includes('MINOR') || cleanScale.includes('PHRYGIAN') || cleanScale.includes('DORIAN');
     return { sharps: totalSharps, isMinor: isMinorLike };
-};
-
-const sanitizeForWriter = (rawEvents: NoteEvent[], isForensic: boolean): NoteEvent[] => {
-    const events = rawEvents.filter(n => n && (n.note || (n as any).pitch)).map(n => ({...n}));
-    events.sort(sortByTick);
-    if (events.length === 0) return [];
-    if (isForensic) return events;
-    const sanitized: NoteEvent[] = [];
-    for (let i = 0; i < events.length; i++) {
-        const current = events[i];
-        if ((current.durationTicks || 0) <= 0) current.durationTicks = 120;
-        const next = events[i + 1];
-        if (next) {
-            const currentStart = current.startTick || 0;
-            const currentEnd = currentStart + (current.durationTicks || 120);
-            const nextStart = next.startTick || 0;
-            if (currentEnd > nextStart) {
-                const newDur = Math.max(1, nextStart - currentStart);
-                current.durationTicks = newDur;
-            }
-        }
-        sanitized.push(current);
-    }
-    return sanitized;
 };
 
 const downloadMetadataReport = (groove: GrooveObject, fileNameBase: string, specificChannel?: ChannelKey) => {
@@ -106,49 +81,71 @@ const downloadMetadataReport = (groove: GrooveObject, fileNameBase: string, spec
 
 export const exportMidi = (groove: GrooveObject, selectedChannels?: ChannelKey[]) => {
     try {
-        const tracks: any[] = [];
-        const WRITER_PPQ = 128; 
-        const scale = WRITER_PPQ / INTERNAL_PPQ;
-        const isForensic = groove.id.includes('V116') || groove.id.includes('FORENSIC') || groove.id.includes('IMPORT') || groove.id.includes('LOOP');
-        const totalBars = groove.totalBars || 4;
-        const totalArrangementTicks = totalBars * TICKS_PER_BAR;
+        // Export via @tonejs/midi using ABSOLUTE ticks at the internal 480 PPQ.
+        // The old midi-writer-js path ran at 128 PPQ with sequential "wait" deltas,
+        // which (a) mismatched the studio grid and (b) serialised chord tones
+        // one-after-another instead of stacking them.
+        const midi = new Midi();
+        midi.header.setTempo(groove.bpm || 140);
+        midi.header.name = groove.name || 'MIDI AI Session';
 
-        const conductorTrack = new MidiWriter.Track();
-        conductorTrack.addTrackName('Conductor');
-        (conductorTrack as any).setTempo(groove.bpm || 140);
-        const keySig = getKeySignatureData(groove.key || 'C', groove.scale || 'Major');
-        try { (conductorTrack as any).addEvent(new (MidiWriter as any).KeySignatureEvent(keySig.sharps, keySig.isMinor ? 1 : 0)); } catch (e) {}
-        conductorTrack.addEvent(new MidiWriter.NoteEvent({pitch:['C-1'], duration: 'T1', velocity: 0, channel: 1} as any));
-        tracks.push(conductorTrack);
+        try {
+            const keySig = getKeySignatureData(groove.key || 'C', groove.scale || 'Major');
+            (midi.header as any).keySignatures = [{
+                key: theoryEngine.normalizeNote(groove.key || 'C').replace(/\d/, ''),
+                scale: keySig.isMinor ? 'minor' : 'major',
+                ticks: 0
+            }];
+        } catch (e) { /* key signature is cosmetic */ }
+
+        let written = 0;
 
         ELITE_16_CHANNELS.forEach((channelKey, i) => {
             if (selectedChannels && selectedChannels.length > 0 && !selectedChannels.includes(channelKey)) return;
             const rawEvents = (groove as any)[channelKey] as NoteEvent[];
             if (!rawEvents || rawEvents.length === 0) return;
-            const track = new MidiWriter.Track();
-            track.addTrackName(channelKey);
-            let lastEventEndTickWriter = 0;
-            const validEvents = sanitizeForWriter(rawEvents, isForensic);
-            validEvents.forEach(n => {
-                const startTick480 = n.startTick || 0;
-                const duration480 = n.durationTicks || 120;
-                const startTickWriter = Math.round(startTick480 * scale);
-                const durationWriter = Math.max(1, Math.round(duration480 * scale));
-                let wait = startTickWriter - lastEventEndTickWriter;
-                if (wait < 0) wait = 0;
-                const pitch = Array.isArray(n.note) ? n.note : [n.note];
-                track.addEvent(new MidiWriter.NoteEvent({ pitch: pitch, duration: `T${durationWriter}`, velocity: Math.round((n.velocity || 0.8) * 100), wait: `T${wait}`, channel: i + 1 } as any));
-                lastEventEndTickWriter = startTickWriter + durationWriter;
+
+            const track = midi.addTrack();
+            track.name = channelKey;
+            // Channel 9 (index) is reserved for GM drums; keep melodic parts off it
+            track.channel = i < 9 ? i : i + 1;
+
+            const events = [...rawEvents]
+                .filter(n => n && (n.note || (n as any).pitch))
+                .sort(sortByTick);
+
+            events.forEach(n => {
+                const ticks = Math.max(0, Math.round(n.startTick || 0));
+                const durationTicks = Math.max(24, Math.round(n.durationTicks || 120));
+                const velocity = Math.min(1, Math.max(0.05, n.velocity ?? 0.8));
+                const pitches = Array.isArray(n.note) ? n.note : [n.note as string];
+
+                pitches.forEach(p => {
+                    if (!p) return;
+                    try {
+                        // Use MIDI numbers - normalizeNote() strips the octave, addNote(name) would misplace it
+                        const midiNumber = theoryEngine.getMidiNote(p);
+                        if (!Number.isFinite(midiNumber) || midiNumber < 0 || midiNumber > 127) return;
+                        track.addNote({ midi: midiNumber, ticks, durationTicks, velocity });
+                        written++;
+                    } catch (err) {
+                        console.warn('[MIDI Export] skipped invalid note', p, err);
+                    }
+                });
             });
-            tracks.push(track);
         });
-        const write = new MidiWriter.Writer(tracks);
-        return { bytes: write.buildFile(), filename: `${groove.name || 'session'}.mid` };
+
+        if (written === 0) {
+            console.warn('[MIDI Export] nothing to export - all channels empty');
+        }
+
+        return { bytes: midi.toArray(), filename: `${groove.name || 'session'}.mid`, noteCount: written };
     } catch (e: any) {
         console.error("MIDI Export Error:", e);
-        return { bytes: null, filename: 'error.mid' };
+        return { bytes: null, filename: 'error.mid', noteCount: 0 };
     }
 };
+
 
 export const downloadFullArrangementMidi = async (groove: GrooveObject) => {
     if (!groove) return;

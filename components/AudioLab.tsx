@@ -85,7 +85,7 @@ const LabPianoRoll: React.FC<{ groove: GrooveObject, progress: number }> = ({ gr
                 <div className="flex items-center gap-2"><div className="w-2 h-2 bg-blue-500 rounded-full" /><span className="text-[10px] font-bold">Scale Sync</span></div>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 bg-amber-500 rounded-full" /><span className="text-[10px] font-bold">Acoustic Signal</span></div>
                 <div className="h-3 w-[1px] bg-white/10 mx-1" />
-                <div className="flex items-center gap-2 text-sky-400"><Star size={10} /><span className="text-[10px] font-black uppercase">1:1 Mono Lead Mode</span></div>
+                <div className="flex items-center gap-2 text-sky-400"><Star size={10} /><span className="text-[10px] font-black uppercase">{(groove as any)?.meta?.mode === 'LEAD_ONLY' ? '1:1 Mono Lead' : 'Full Band Separation'}</span></div>
             </div>
         </div>
     );
@@ -98,6 +98,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
     const [manualBpm, setManualBpm] = useState<number>(0);
+    const [mode, setMode] = useState<'FULL_BAND' | 'LEAD_ONLY'>('FULL_BAND');
     const [showSettings, setShowSettings] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -121,8 +122,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
         const file = files[0];
         setAudioUrl(URL.createObjectURL(file));
         const overrideBpm = manualBpm > 20 ? manualBpm : undefined;
-        setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm));
-    }, [manualBpm]);
+        setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm, mode));
+    }, [manualBpm, mode]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
         onDrop, 
@@ -181,8 +182,22 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                                 />
                             </div>
                         </div>
+                        <div className="flex flex-col gap-2 bg-black/40 p-4 rounded-2xl border border-white/5 w-full md:w-auto">
+                            <label className="text-[8px] font-black text-gray-500 uppercase">Transcription Mode</label>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setMode('FULL_BAND')}
+                                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${mode === 'FULL_BAND' ? 'bg-blue-600 text-white shadow-glow' : 'bg-white/5 text-gray-400 hover:text-white'}`}
+                                >Full Band</button>
+                                <button
+                                    onClick={() => setMode('LEAD_ONLY')}
+                                    className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${mode === 'LEAD_ONLY' ? 'bg-blue-600 text-white shadow-glow' : 'bg-white/5 text-gray-400 hover:text-white'}`}
+                                >Mono Lead</button>
+                            </div>
+                        </div>
                         <p className="text-[10px] text-gray-500 max-w-sm leading-relaxed">
-                            If the AI misidentifies the tempo, enter the correct BPM here. This forces the 120-tick grid alignment protocol for better DAW compatibility.
+                            <b className="text-gray-300">Full Band</b> separates the song into kick, snare, hats, bass, lead, chords and pads on individual channels.
+                            <b className="text-gray-300"> Mono Lead</b> extracts only the main melody. If the AI misidentifies the tempo, enter the correct BPM above.
                         </p>
                     </div>
                 </div>
@@ -197,14 +212,14 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                                 <AudioWaveform size={48} className={isDragActive ? 'text-blue-400 animate-pulse' : 'text-gray-500'} />
                             </div>
                             <h3 className="text-2xl font-black uppercase tracking-widest text-white italic">Audio to MIDI</h3>
-                            <p className="text-sm text-gray-500 font-medium mt-4 uppercase text-center max-w-sm">Upload a song to extract a 1:1 monophonic lead melody.</p>
+                            <p className="text-sm text-gray-500 font-medium mt-4 uppercase text-center max-w-sm">{mode === 'FULL_BAND' ? 'Upload a song to separate it into drums, bass, lead, chords & more.' : 'Upload a song to extract a 1:1 monophonic lead melody.'}</p>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="bg-white/5 border border-white/5 p-6 rounded-3xl group hover:border-blue-500/30 transition-all">
                                 <Layers className="text-blue-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">1:1 Lead Extraction</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">Focuses entirely on a single prominent melody. Ignores chords, drums, and bass for pure monophonic accuracy.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">Multi-Channel Separation</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">Kick, snare, clap, hats, percussion, sub, bass, lead, vocal, arp, chords and pads - each transcribed to its own channel.</p>
                             </div>
                             <div className="bg-white/5 border border-white/5 p-6 rounded-3xl group hover:border-amber-500/30 transition-all">
                                 <Zap className="text-amber-500 mb-3" size={20} />
@@ -243,7 +258,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                         <div className="flex justify-between items-center bg-[#0A0A0C] p-8 rounded-[2.5rem] border border-white/10 shadow-2xl">
                             <div className="flex gap-12">
                                 <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Detected Tempo</div><div className="text-3xl font-black font-mono">{activeJob.result.bpm} <span className="text-sm opacity-30">BPM</span></div></div>
-                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Transcription</div><div className="text-3xl font-black font-mono text-blue-400">1:1 <span className="text-xl opacity-60 italic">MONO LEAD</span></div></div>
+                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Detected Key</div><div className="text-3xl font-black font-mono text-amber-400">{activeJob.result.key} <span className="text-sm opacity-40">{activeJob.result.scale}</span></div></div>
+                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Channels Extracted</div><div className="text-3xl font-black font-mono text-blue-400">{Object.keys(activeJob.result?.meta?.channels || {}).length} <span className="text-sm opacity-40">/ {activeJob.result?.meta?.totalNotes || 0} notes</span></div></div>
                             </div>
                             <div className="flex items-center gap-6">
                                 <div className="text-right hidden sm:block">
@@ -255,6 +271,16 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                                 </button>
                             </div>
                         </div>
+                        {activeJob.result?.meta?.channels && Object.keys(activeJob.result.meta.channels).length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                                {Object.entries(activeJob.result.meta.channels as Record<string, number>).map(([ch, count]) => (
+                                    <div key={ch} className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
+                                        <span className="text-[10px] font-black uppercase text-white">{ch.replace(/^ch\d+_/, '')}</span>
+                                        <span className="text-[10px] font-mono text-blue-400">{count}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                         <div className="flex-1 min-h-[400px] relative rounded-[3rem] overflow-hidden shadow-2xl border border-white/10">
                             <LabPianoRoll groove={activeJob.result} progress={progress} />
                         </div>

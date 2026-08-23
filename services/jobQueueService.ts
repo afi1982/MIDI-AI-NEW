@@ -2,7 +2,7 @@
 import { GrooveObject, GenerationParams, ChannelKey } from '../types';
 import { generateTranceSequence, deconstructYoutubeLink, generateDivineMelody } from './geminiService';
 import { maestroService, ELITE_16_CHANNELS } from './maestroService.ts';
-import { analyzeAudioChunk, sliceAudio } from './audioAnalysisService';
+import { analyzeAudioChunk, sliceAudio, TranscriptionMode } from './audioAnalysisService';
 import { forensicFixerService } from './forensicFixerService';
 import { contextBridge } from './contextBridgeService';
 import { midiRendererService, RenderProfile } from './midiRendererService';
@@ -38,8 +38,8 @@ class JobQueueService {
         return [...this.jobs];
     }
 
-    public addAudioJob(file: File, overrideBpm?: number) {
-        const job: Job = { id: `AUDIO-${Date.now()}`, type: 'AUDIO_REGRESSION', status: 'PENDING', name: `Audio to MIDI: ${file.name}`, progress: 0, createdAt: Date.now(), payload: { file, overrideBpm } };
+    public addAudioJob(file: File, overrideBpm?: number, mode: TranscriptionMode = 'FULL_BAND') {
+        const job: Job = { id: `AUDIO-${Date.now()}`, type: 'AUDIO_REGRESSION', status: 'PENDING', name: `Audio to MIDI: ${file.name}`, progress: 0, createdAt: Date.now(), payload: { file, overrideBpm, mode } };
         this.jobs.unshift(job);
         this.notify();
         this.processQueue();
@@ -159,12 +159,17 @@ class JobQueueService {
 
     private async runAudioJob(job: Job) {
         const CHUNK_LEN = 12; 
+        const mode: TranscriptionMode = job.payload.mode || 'FULL_BAND';
         
-        // Phase 1: Slicing (0-30%)
-        const slices = await sliceAudio(job.payload.file, CHUNK_LEN, (p) => {
+        // Phase 1: Slicing + global tempo detection (0-30%)
+        const { chunks: slices, detectedBpm, durationSec } = await sliceAudio(job.payload.file, CHUNK_LEN, (p) => {
             job.progress = p;
             this.notify();
         });
+
+        // ONE tempo grid for the whole song - otherwise every 12s chunk gets its
+        // own tempo mapping and the reconstruction drifts out of sync.
+        const gridBpm = job.payload.overrideBpm || detectedBpm || undefined;
 
         const segments: GrooveObject[] = new Array(slices.length);
         
@@ -173,7 +178,7 @@ class JobQueueService {
         for (let i = 0; i < slices.length; i += batchSize) {
             const batch = slices.slice(i, i + batchSize).map((slice, idx) => {
                 const realIdx = i + idx;
-                return analyzeAudioChunk(slice.blob, realIdx, CHUNK_LEN, slice.isSilent, job.payload.overrideBpm).then(res => {
+                return analyzeAudioChunk(slice.blob, realIdx, CHUNK_LEN, slice.isSilent, gridBpm, mode).then(res => {
                     segments[realIdx] = res;
                     const completed = segments.filter(s => !!s).length;
                     // Map 0-100% of analysis to 30-100% of total progress
@@ -182,7 +187,7 @@ class JobQueueService {
                     this.notify();
                 }).catch(err => {
                     console.error(`Batch error at index ${realIdx}:`, err);
-                    segments[realIdx] = { id: `ERR-${realIdx}`, bpm: job.payload.overrideBpm || 140, key: "C", scale: "Chromatic", totalBars: 4 } as any;
+                    segments[realIdx] = { id: `ERR-${realIdx}`, bpm: gridBpm || 140, key: "C", scale: "Chromatic", totalBars: 4 } as any;
                     const completed = segments.filter(s => !!s).length;
                     const analysisProgress = (completed / slices.length) * 70;
                     job.progress = Math.round(30 + analysisProgress);
@@ -192,10 +197,45 @@ class JobQueueService {
             await Promise.all(batch);
         }
 
-        const master: any = { ...segments[0], id: `RECON-${Date.now()}`, totalBars: segments.reduce((s, seg) => s + (seg.totalBars || 0), 0) };
+        const finalBpm = gridBpm || segments.find(s => s?.bpm)?.bpm || 140;
+        const keySource = segments.find(s => s && (s as any).key && (s as any).key !== 'C');
+
+        const master: any = {
+            ...segments[0],
+            id: `RECON-${Date.now()}`,
+            name: `Transcription: ${job.payload.file?.name || 'Audio'}`,
+            bpm: finalBpm,
+            key: (keySource as any)?.key || segments[0]?.key || 'C',
+            scale: (keySource as any)?.scale || segments[0]?.scale || 'Minor'
+        };
+
+        let maxTick = 0;
+        const channelStats: Record<string, number> = {};
+
         ELITE_16_CHANNELS.forEach(ch => {
-            (master as any)[ch] = segments.flatMap(seg => (seg as any)[ch] || []);
+            const merged = segments
+                .flatMap(seg => (seg as any)?.[ch] || [])
+                .sort((a: any, b: any) => (a.startTick || 0) - (b.startTick || 0));
+            master[ch] = merged;
+            if (merged.length) channelStats[ch] = merged.length;
+            merged.forEach((n: any) => {
+                const end = (n.startTick || 0) + (n.durationTicks || 120);
+                if (end > maxTick) maxTick = end;
+            });
         });
+
+        // Bars from the real content length (fallback: audio duration)
+        const barsFromAudio = Math.ceil((durationSec * finalBpm) / 240);
+        master.totalBars = Math.max(4, Math.ceil(maxTick / 1920), barsFromAudio);
+        master.meta = {
+            ...(master.meta || {}),
+            mode,
+            detectedBpm,
+            channels: channelStats,
+            totalNotes: Object.values(channelStats).reduce((a, b) => a + b, 0)
+        };
+
+        console.log(`🎼 Transcription complete (${mode}) @ ${finalBpm} BPM`, channelStats);
         job.result = master;
     }
 
