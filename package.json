@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@google/genai": "^1.35.0",
     "@tonejs/midi": "2.0.28",
     "jszip": "3.10.1",

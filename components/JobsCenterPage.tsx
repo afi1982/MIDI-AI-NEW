@@ -21,7 +21,9 @@ const JobRow: React.FC<{ job: Job, onOpen: (g: GrooveObject) => void, onCancel: 
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `Rendered_Audio_${Date.now()}.wav`;
+                const mime = blob?.type || job.payload?.mime || '';
+                const ext = mime.includes('mpeg') || mime.includes('mp3') ? 'mp3' : 'wav';
+                a.download = job.payload?.filename || `MIDI_AI_${Date.now()}.${ext}`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);

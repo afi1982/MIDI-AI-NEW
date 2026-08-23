@@ -242,13 +242,14 @@ class JobQueueService {
 
     private async runRenderJob(job: Job) {
         const { file, profile } = job.payload;
-        const blob = await midiRendererService.renderToWav(file, profile, (p) => {
-            job.progress = Math.round(p * 0.9);
+        const rendered = await midiRendererService.renderToAudio(file, profile, (p) => {
+            job.progress = Math.min(96, Math.round(p));
             this.notify();
         });
-        job.quality = await inspectAudioBlob(blob);
-        job.result = blob;
-        job.name = `${job.quality.passed ? 'QA PASS' : 'QA CHECK'} ${job.quality.score} · Render`;
+        job.quality = rendered.quality || await inspectAudioBlob(rendered.wav || rendered.blob);
+        job.result = rendered.blob;
+        job.payload = { ...job.payload, filename: rendered.filename, mime: rendered.mime, duration: rendered.duration, notes: rendered.notes };
+        job.name = `${job.quality.passed ? 'QA PASS' : 'QA CHECK'} ${job.quality.score} · MP3`;
     }
 
     public clearCompleted() {
