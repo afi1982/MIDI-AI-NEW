@@ -45,7 +45,7 @@ const getChannelDisplayName = (key: string): string => {
     return key.toUpperCase();
 };
 
-export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, activeTrack, onSelectTrack, playbackTime, onUpdateTrack, onSampleLoad, showSidebar, pixelsPerBar = 120 }) => {
+export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, activeTrack, onSelectTrack, playbackTime, onSeek, onUpdateTrack, onSampleLoad, showSidebar, pixelsPerBar = 120 }) => {
   const scrollRef = useRef<HTMLDivElement>(null); 
   const sidebarRef = useRef<HTMLDivElement>(null); 
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -96,7 +96,7 @@ export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, ac
       if (scrollRef.current) scrollRef.current.scrollTop = e.currentTarget.scrollTop;
   };
 
-  const totalBars = Math.max(groove?.totalBars || 128, 128);
+  const totalBars = Math.max(32, Math.min(64, groove?.totalBars || 32));
   const totalWidth = totalBars * pixelsPerBar;
 
   const toggleMute = (e: React.MouseEvent, key: string) => {
@@ -281,7 +281,21 @@ export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, ac
               </div>
             )}
 
-            <div ref={scrollRef} onScroll={handleTimelineScroll} className="flex-1 overflow-auto bg-[#050506] relative custom-scrollbar scroll-smooth" data-no-swipe="true">
+            <div
+              ref={scrollRef}
+              onScroll={handleTimelineScroll}
+              onPointerUp={(e) => {
+                if (!onSeek || !scrollRef.current) return;
+                const target = e.target as HTMLElement;
+                if (target.closest('button, label, input')) return;
+                const node = scrollRef.current;
+                const rect = node.getBoundingClientRect();
+                const x = e.clientX - rect.left + node.scrollLeft;
+                onSeek(Math.max(0, x / pixelsPerBar) * 4 * (60 / (groove.bpm || 145)));
+              }}
+              className="flex-1 overflow-auto bg-[#050506] relative custom-scrollbar scroll-smooth"
+              data-no-swipe="true"
+            >
                 <div className="relative" style={{ width: totalWidth, height: ALL_CHANNELS.length * ROW_HEIGHT }}>
                     <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px)`, backgroundSize: `${pixelsPerBar}px ${ROW_HEIGHT}px` }}></div>
 

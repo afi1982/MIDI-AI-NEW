@@ -1,0 +1,103 @@
+import { analyzeBufferToStems, midiToHz, secToTick } from '../services/audioStemService';
+import { theoryEngine } from '../services/theoryEngine';
+
+function synthMix(sr: number) {
+  const melody = [67, 69, 71, 74, 71, 69, 67, 64, 62, 64, 67, 67];
+  const noteDur = 0.36;
+  const total = melody.length * noteDur + 0.4;
+  const n = Math.floor(sr * total);
+  const mix = new Float32Array(n);
+  const expected: { midi: number; t: number; dur: number }[] = [];
+
+  const addTone = (start: number, dur: number, midi: number, gain: number, harms: number[]) => {
+    const f = midiToHz(midi);
+    const i0 = Math.floor(start * sr);
+    const len = Math.floor(dur * sr);
+    for (let i = 0; i < len && i0 + i < n; i++) {
+      const t = i / sr;
+      const env = Math.min(1, t / 0.012) * Math.min(1, (dur - t) / 0.03);
+      let s = 0;
+      harms.forEach((h, hi) => { s += (1 / (hi + 1)) * Math.sin(2 * Math.PI * f * h * t); });
+      mix[i0 + i] += gain * env * s;
+    }
+  };
+
+  melody.forEach((midi, i) => {
+    const t = 0.12 + i * noteDur;
+    addTone(t, noteDur * 0.92, midi, 0.42, [1, 2, 3, 4]);
+    expected.push({ midi, t, dur: noteDur * 0.92 });
+  });
+
+  for (let i = 0; i < melody.length; i += 2) {
+    const t = 0.12 + i * noteDur;
+    addTone(t, noteDur * 1.85, i % 4 === 0 ? 36 : 31, 0.28, [1, 2]);
+  }
+  for (let t = 0.12; t < total - 0.2; t += 0.36) {
+    const i0 = Math.floor(t * sr);
+    for (let i = 0; i < Math.floor(0.05 * sr) && i0 + i < n; i++) {
+      const env = Math.exp(-i / (0.012 * sr));
+      mix[i0 + i] += 0.35 * env * Math.sin(2 * Math.PI * 55 * (i / sr));
+    }
+  }
+  return { mix, expected };
+}
+
+function midiOf(note: string | string[]) {
+  return theoryEngine.getMidiNote(Array.isArray(note) ? note[0] : note);
+}
+
+const sr = 22050;
+const { mix, expected } = synthMix(sr);
+const analysis = await analyzeBufferToStems(mix, sr);
+const lead = analysis.lead;
+if (lead.length < expected.length * 0.6) {
+  throw new Error(`Too few lead notes: ${lead.length} vs expected ${expected.length}`);
+}
+
+let hits = 0;
+for (const exp of expected) {
+  const expTick = secToTick(exp.t, analysis.sourceBpm || analysis.bpm);
+  const match = lead.find((n) => {
+    const m = midiOf(n.note);
+    const dt = Math.abs((n.startTick || 0) - expTick);
+    return Math.abs(m - exp.midi) <= 1 && dt < 240;
+  });
+  if (match) hits++;
+}
+const acc = hits / expected.length;
+console.log({
+  leadNotes: lead.length,
+  expected: expected.length,
+  hits,
+  accuracyPct: Math.round(acc * 100),
+  bpm: analysis.bpm,
+  sourceBpm: analysis.sourceBpm,
+  key: `${analysis.key} ${analysis.scale}`,
+  bass: analysis.bassNotes.length,
+  firstLead: lead.slice(0, 12).map((n) => `${n.note}@${n.startTick}`),
+  expectedMidi: expected.map((e) => e.midi),
+});
+if (acc < 0.75) {
+  throw new Error(`Melody accuracy ${Math.round(acc * 100)}% is below 75% 1:1 gate`);
+}
+
+const buried = synthMix(sr);
+for (let i = 0; i < buried.mix.length; i++) {
+  const t = i / sr;
+  buried.mix[i] = buried.mix[i] * 0.72 + 0.12 * Math.sin(2 * Math.PI * 220 * t);
+}
+const buriedAnalysis = await analyzeBufferToStems(buried.mix, sr);
+let buriedHits = 0;
+for (const exp of buried.expected) {
+  const expTick = secToTick(exp.t, buriedAnalysis.sourceBpm || buriedAnalysis.bpm);
+  if (buriedAnalysis.lead.some((n) => Math.abs(midiOf(n.note) - exp.midi) <= 1 && Math.abs((n.startTick || 0) - expTick) < 280)) {
+    buriedHits++;
+  }
+}
+const buriedAcc = buriedHits / buried.expected.length;
+console.log({ buriedLead: buriedAnalysis.lead.length, buriedHits, buriedPct: Math.round(buriedAcc * 100) });
+if (buriedAcc < 0.65) {
+  throw new Error(`Buried melody accuracy ${Math.round(buriedAcc * 100)}% is below 65%`);
+}
+
+console.log('AUDIO-TO-MIDI 1:1 CHECK PASSED');

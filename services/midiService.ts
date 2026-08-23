@@ -1,6 +1,7 @@
 
 import { Midi } from '@tonejs/midi';
 import { GrooveObject, NoteEvent, ChannelKey, ScaleType } from '../types.ts';
+import MidiWriter from 'midi-writer-js'; 
 import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
 import { engineProfileService, getEngineStats } from './engineProfileService';
@@ -35,6 +36,30 @@ const getKeySignatureData = (root: string, scale: string): { sharps: number, isM
     const totalSharps = baseSharps + modeOffset;
     const isMinorLike = cleanScale.includes('MINOR') || cleanScale.includes('PHRYGIAN') || cleanScale.includes('DORIAN');
     return { sharps: totalSharps, isMinor: isMinorLike };
+};
+
+const sanitizeForWriter = (rawEvents: NoteEvent[], isForensic: boolean): NoteEvent[] => {
+    const events = rawEvents.filter(n => n && (n.note || (n as any).pitch)).map(n => ({...n}));
+    events.sort(sortByTick);
+    if (events.length === 0) return [];
+    if (isForensic) return events;
+    const sanitized: NoteEvent[] = [];
+    for (let i = 0; i < events.length; i++) {
+        const current = events[i];
+        if ((current.durationTicks || 0) <= 0) current.durationTicks = 120;
+        const next = events[i + 1];
+        if (next) {
+            const currentStart = current.startTick || 0;
+            const currentEnd = currentStart + (current.durationTicks || 120);
+            const nextStart = next.startTick || 0;
+            if (currentEnd > nextStart) {
+                const newDur = Math.max(1, nextStart - currentStart);
+                current.durationTicks = newDur;
+            }
+        }
+        sanitized.push(current);
+    }
+    return sanitized;
 };
 
 const downloadMetadataReport = (groove: GrooveObject, fileNameBase: string, specificChannel?: ChannelKey) => {
@@ -79,26 +104,33 @@ const downloadMetadataReport = (groove: GrooveObject, fileNameBase: string, spec
     setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url); }, 500);
 };
 
+const TRACK_NAMES: Record<string, string> = {
+    ch1_kick: '01 Kick',
+    ch2_sub: '02 Sub Bass',
+    ch3_midBass: '03 Mid Bass',
+    ch4_leadA: '04 Lead A',
+    ch5_leadB: '05 Lead B',
+    ch6_arpA: '06 Arp A',
+    ch7_arpB: '07 Arp B',
+    ch8_snare: '08 Snare',
+    ch9_clap: '09 Clap',
+    ch10_percLoop: '10 Perc Loop',
+    ch11_percTribal: '11 Perc Tribal',
+    ch12_hhClosed: '12 HH Closed',
+    ch13_hhOpen: '13 HH Open',
+    ch14_acid: '14 Acid',
+    ch15_pad: '15 Pad',
+    ch16_synth: '16 Synth FX',
+};
+
+const DRUM_KEYS = new Set<ChannelKey>([
+    'ch1_kick', 'ch8_snare', 'ch9_clap', 'ch10_percLoop', 'ch11_percTribal', 'ch12_hhClosed', 'ch13_hhOpen'
+]);
+
 export const exportMidi = (groove: GrooveObject, selectedChannels?: ChannelKey[]) => {
     try {
-        // Export via @tonejs/midi using ABSOLUTE ticks at the internal 480 PPQ.
-        // The old midi-writer-js path ran at 128 PPQ with sequential "wait" deltas,
-        // which (a) mismatched the studio grid and (b) serialised chord tones
-        // one-after-another instead of stacking them.
         const midi = new Midi();
-        midi.header.setTempo(groove.bpm || 140);
-        midi.header.name = groove.name || 'MIDI AI Session';
-
-        try {
-            const keySig = getKeySignatureData(groove.key || 'C', groove.scale || 'Major');
-            (midi.header as any).keySignatures = [{
-                key: theoryEngine.normalizeNote(groove.key || 'C').replace(/\d/, ''),
-                scale: keySig.isMinor ? 'minor' : 'major',
-                ticks: 0
-            }];
-        } catch (e) { /* key signature is cosmetic */ }
-
-        let written = 0;
+        midi.header.setTempo(groove.bpm || 145);
 
         ELITE_16_CHANNELS.forEach((channelKey, i) => {
             if (selectedChannels && selectedChannels.length > 0 && !selectedChannels.includes(channelKey)) return;
@@ -106,46 +138,30 @@ export const exportMidi = (groove: GrooveObject, selectedChannels?: ChannelKey[]
             if (!rawEvents || rawEvents.length === 0) return;
 
             const track = midi.addTrack();
-            track.name = channelKey;
-            // Channel 9 (index) is reserved for GM drums; keep melodic parts off it
-            track.channel = i < 9 ? i : i + 1;
+            track.name = TRACK_NAMES[channelKey] || channelKey;
+            track.channel = DRUM_KEYS.has(channelKey) ? 9 : i;
 
-            const events = [...rawEvents]
-                .filter(n => n && (n.note || (n as any).pitch))
-                .sort(sortByTick);
-
-            events.forEach(n => {
-                const ticks = Math.max(0, Math.round(n.startTick || 0));
-                const durationTicks = Math.max(24, Math.round(n.durationTicks || 120));
-                const velocity = Math.min(1, Math.max(0.05, n.velocity ?? 0.8));
-                const pitches = Array.isArray(n.note) ? n.note : [n.note as string];
-
-                pitches.forEach(p => {
-                    if (!p) return;
-                    try {
-                        // Use MIDI numbers - normalizeNote() strips the octave, addNote(name) would misplace it
-                        const midiNumber = theoryEngine.getMidiNote(p);
-                        if (!Number.isFinite(midiNumber) || midiNumber < 0 || midiNumber > 127) return;
-                        track.addNote({ midi: midiNumber, ticks, durationTicks, velocity });
-                        written++;
-                    } catch (err) {
-                        console.warn('[MIDI Export] skipped invalid note', p, err);
-                    }
+            rawEvents.forEach((n) => {
+                const name = Array.isArray(n.note) ? n.note[0] : n.note;
+                if (!name) return;
+                const midiNum = theoryEngine.getMidiNote(name);
+                if (!Number.isFinite(midiNum)) return;
+                track.addNote({
+                    midi: midiNum,
+                    ticks: Math.max(0, n.startTick || 0),
+                    durationTicks: Math.max(20, n.durationTicks || 120),
+                    velocity: Math.max(0.2, Math.min(1, n.velocity || 0.8)),
                 });
             });
         });
 
-        if (written === 0) {
-            console.warn('[MIDI Export] nothing to export - all channels empty');
-        }
-
-        return { bytes: midi.toArray(), filename: `${groove.name || 'session'}.mid`, noteCount: written };
+        const safeName = (groove.name || 'MIDI_AI_Track').replace(/[^\w\- ]+/g, '').trim() || 'MIDI_AI_Track';
+        return { bytes: new Uint8Array(midi.toArray()), filename: `${safeName}.mid` };
     } catch (e: any) {
-        console.error("MIDI Export Error:", e);
-        return { bytes: null, filename: 'error.mid', noteCount: 0 };
+        console.error('MIDI Export Error:', e);
+        return { bytes: null, filename: 'error.mid' };
     }
 };
-
 
 export const downloadFullArrangementMidi = async (groove: GrooveObject) => {
     if (!groove) return;
@@ -187,149 +203,101 @@ export const downloadAnalyzedMidi = async (segments: GrooveObject[]) => {
     await downloadFullArrangementMidi(masterGroove);
 };
 
-/**
- * Files written by this app (midi-writer-js) use PPQ 128, Audio-To-MIDI / DAW
- * exports commonly use 96, 192, 384, 480 or 960.
- * Every tick coming from a file MUST be rescaled to the internal 480 PPQ grid,
- * otherwise notes are crushed into the first bar with ~20ms durations
- * (= "the studio plays nothing").
- */
-const getTickScale = (midi: Midi): number => {
-    const filePpq = midi.header?.ppq || INTERNAL_PPQ;
-    if (!filePpq || filePpq <= 0) return 1;
-    return INTERNAL_PPQ / filePpq;
-};
+const INTERNAL_FROM_FILE = (ticks: number, ppq: number) => Math.round((ticks * INTERNAL_PPQ) / Math.max(1, ppq));
 
-const MIN_DURATION_TICKS = 60;      // 1/32 note @480ppq - anything shorter is inaudible
-const MIN_VELOCITY = 0.35;          // Audio-To-MIDI often outputs near-zero velocities
-
-const toNoteEvent = (n: any, scale: number): NoteEvent => {
-    const startTick = Math.max(0, Math.round((n.ticks || 0) * scale));
-    const rawDur = Math.round((n.durationTicks || 0) * scale);
-    const durationTicks = Math.max(MIN_DURATION_TICKS, rawDur || 0);
-    const bar = Math.floor(startTick / TICKS_PER_BAR);
-    const beat = Math.floor((startTick % TICKS_PER_BAR) / INTERNAL_PPQ);
-    const sixteen = Math.floor((startTick % INTERNAL_PPQ) / 120);
-    const velocity = Math.min(1, Math.max(MIN_VELOCITY, n.velocity ?? 0.8));
+const noteFromMidi = (midiNum: number, ticks: number, durationTicks: number, velocity: number): NoteEvent => {
+    const startTick = Math.max(0, ticks);
+    const bar = Math.floor(startTick / 1920);
+    const beat = Math.floor((startTick % 1920) / 480);
+    const sixteen = Math.floor((startTick % 480) / 120);
     return {
-        note: theoryEngine.midiToNote(n.midi),
-        duration: "custom",
-        durationTicks,
+        note: theoryEngine.midiToNote(midiNum),
+        duration: 'custom',
+        durationTicks: Math.max(20, durationTicks || 120),
         startTick,
         time: `${bar}:${beat}:${sixteen}`,
-        velocity
-    } as NoteEvent;
+        velocity: Math.max(0.25, Math.min(1, velocity || 0.8)),
+    };
+};
+
+const resolveImportChannel = (trackName: string, channelIndex: number, midiNum?: number): ChannelKey => {
+    const name = (trackName || '').toLowerCase().replace(/[_-]+/g, ' ');
+    const rules: { key: ChannelKey; needles: string[] }[] = [
+        { key: 'ch1_kick', needles: ['kick', 'bd ', ' bass drum'] },
+        { key: 'ch2_sub', needles: ['sub'] },
+        { key: 'ch3_midBass', needles: ['mid bass', 'midbass', 'baseline'] },
+        { key: 'ch4_leadA', needles: ['lead a', 'hero', 'lead'] },
+        { key: 'ch5_leadB', needles: ['lead b', 'harmony'] },
+        { key: 'ch6_arpA', needles: ['arp a', 'arp'] },
+        { key: 'ch7_arpB', needles: ['arp b'] },
+        { key: 'ch8_snare', needles: ['snare', 'sd'] },
+        { key: 'ch9_clap', needles: ['clap'] },
+        { key: 'ch10_percLoop', needles: ['perc loop', 'perc'] },
+        { key: 'ch11_percTribal', needles: ['tribal'] },
+        { key: 'ch12_hhClosed', needles: ['hh closed', 'closed', 'hihat', 'hhc'] },
+        { key: 'ch13_hhOpen', needles: ['hh open', 'open hat', 'hho'] },
+        { key: 'ch14_acid', needles: ['acid', '303'] },
+        { key: 'ch15_pad', needles: ['pad', 'atmos'] },
+        { key: 'ch16_synth', needles: ['synth', 'fx'] },
+    ];
+    for (const rule of rules) {
+        if (rule.needles.some((n) => name.includes(n))) return rule.key;
+    }
+    if (midiNum === 36) return 'ch1_kick';
+    if (midiNum === 38) return 'ch8_snare';
+    if (midiNum === 39) return 'ch9_clap';
+    if (midiNum === 42) return 'ch12_hhClosed';
+    if (midiNum === 46) return 'ch13_hhOpen';
+    return ELITE_16_CHANNELS[Math.min(channelIndex, ELITE_16_CHANNELS.length - 1)];
 };
 
 export const importMidiNotesToTrack = async (file: File): Promise<NoteEvent[]> => {
     const arrayBuffer = await file.arrayBuffer();
     const midi = new Midi(arrayBuffer);
-    const scale = getTickScale(midi);
+    const ppq = midi.header.ppq || 480;
     const events: NoteEvent[] = [];
-    midi.tracks.forEach(track => {
-        track.notes.forEach(n => events.push(toNoteEvent(n, scale)));
+    midi.tracks.forEach((track) => {
+        track.notes.forEach((n) => {
+            events.push(noteFromMidi(n.midi, INTERNAL_FROM_FILE(n.ticks, ppq), INTERNAL_FROM_FILE(n.durationTicks, ppq), n.velocity));
+        });
     });
-    return events.sort(sortByTick);
-};
-
-const DRUM_CHANNELS: ChannelKey[] = ['ch1_kick', 'ch8_snare', 'ch9_clap', 'ch12_hhClosed', 'ch13_hhOpen', 'ch10_percLoop', 'ch11_percTribal'] as ChannelKey[];
-const MELODIC_FALLBACKS: ChannelKey[] = ['ch4_leadA', 'ch5_leadB', 'ch16_synth', 'ch6_arpA', 'ch7_arpB', 'ch15_pad', 'ch14_acid'] as ChannelKey[];
-const BASS_FALLBACKS: ChannelKey[] = ['ch3_midBass', 'ch2_sub'] as ChannelKey[];
-
-const matchChannelByName = (rawName: string): ChannelKey | null => {
-    const name = (rawName || '').toLowerCase();
-    if (!name) return null;
-    for (const key of ELITE_16_CHANNELS) {
-        const alias = key.split('_')[1].toLowerCase();
-        if (name.includes(key.toLowerCase()) || name.includes(alias)) return key;
-    }
-    // Common DAW / transcription naming
-    if (/kick|bd\b/.test(name)) return 'ch1_kick' as ChannelKey;
-    if (/snare|sd\b/.test(name)) return 'ch8_snare' as ChannelKey;
-    if (/clap/.test(name)) return 'ch9_clap' as ChannelKey;
-    if (/hat|hh/.test(name)) return 'ch12_hhClosed' as ChannelKey;
-    if (/perc|tom|ride|crash/.test(name)) return 'ch10_percLoop' as ChannelKey;
-    if (/sub/.test(name)) return 'ch2_sub' as ChannelKey;
-    if (/bass|808/.test(name)) return 'ch3_midBass' as ChannelKey;
-    if (/pad|string|atmo/.test(name)) return 'ch15_pad' as ChannelKey;
-    if (/arp/.test(name)) return 'ch6_arpA' as ChannelKey;
-    if (/acid|303/.test(name)) return 'ch14_acid' as ChannelKey;
-    if (/lead|melody|vocal|voice|piano|guitar|synth|pluck/.test(name)) return 'ch4_leadA' as ChannelKey;
-    return null;
+    return events;
 };
 
 export const importMidiAsGroove = async (file: File): Promise<{ groove: GrooveObject }> => {
     const arrayBuffer = await file.arrayBuffer();
     const midi = new Midi(arrayBuffer);
-    const scale = getTickScale(midi);
-    const bpm = midi.header.tempos[0]?.bpm || 145;
-
+    const ppq = midi.header.ppq || 480;
+    const bpm = Math.round(midi.header.tempos[0]?.bpm || 145);
     const groove: any = {
         id: `IMPORT_${Date.now()}`,
-        name: file.name.replace(/\.(mid|midi)$/i, '') || 'Imported',
-        bpm: Math.round(bpm),
-        key: "C",
-        scale: "Minor",
-        totalBars: 4
+        name: file.name.replace(/\.[^.]+$/, ''),
+        bpm,
+        key: 'F#',
+        scale: 'Phrygian',
+        totalBars: 32,
     };
-    ELITE_16_CHANNELS.forEach(ch => groove[ch] = []);
+    ELITE_16_CHANNELS.forEach((ch) => { groove[ch] = []; });
 
-    const used = new Set<ChannelKey>();
-    let melodicCursor = 0;
-    let bassCursor = 0;
-    let drumCursor = 0;
     let maxTick = 0;
-    let importedNotes = 0;
-
-    // Skip empty tracks and the metadata "Conductor" track we write on export
-    const playable = midi.tracks.filter(t =>
-        t.notes.length > 0 && !/conductor|tempo|marker/i.test(t.name || '')
-    );
-
-    playable.forEach(track => {
-        const isPercussion = track.channel === 9 || (track as any).instrument?.percussion;
-        const avgMidi = track.notes.reduce((s, n) => s + n.midi, 0) / track.notes.length;
-
-        let targetChannel = matchChannelByName(track.name) || matchChannelByName((track as any).instrument?.name || '');
-
-        if (!targetChannel) {
-            if (isPercussion) {
-                targetChannel = DRUM_CHANNELS[drumCursor++ % DRUM_CHANNELS.length];
-            } else if (avgMidi < 48) {
-                // Low register -> bass, NEVER onto the kick channel (MembraneSynth = inaudible melody)
-                targetChannel = BASS_FALLBACKS[bassCursor++ % BASS_FALLBACKS.length];
-            } else {
-                targetChannel = MELODIC_FALLBACKS[melodicCursor++ % MELODIC_FALLBACKS.length];
-            }
+    const used = new Set<ChannelKey>();
+    midi.tracks.forEach((track, i) => {
+        if (!track.notes.length) return;
+        const first = track.notes[0];
+        let target = resolveImportChannel(track.name || '', i, first?.midi);
+        if (used.has(target) && !track.name) {
+            target = ELITE_16_CHANNELS.find((ch) => !used.has(ch)) || target;
         }
-
-        // Avoid stacking two different tracks on the same channel when free slots exist
-        if (used.has(targetChannel) && !isPercussion) {
-            const pool = avgMidi < 48 ? BASS_FALLBACKS : MELODIC_FALLBACKS;
-            const free = pool.find(c => !used.has(c));
-            if (free) targetChannel = free;
-        }
-        used.add(targetChannel);
-
-        const notes = track.notes
-            .map(n => toNoteEvent(n, scale))
-            .sort(sortByTick);
-
-        notes.forEach(n => {
-            const end = (n.startTick || 0) + (n.durationTicks || 0);
-            if (end > maxTick) maxTick = end;
+        used.add(target);
+        track.notes.forEach((n) => {
+            const evn = noteFromMidi(n.midi, INTERNAL_FROM_FILE(n.ticks, ppq), INTERNAL_FROM_FILE(n.durationTicks, ppq), n.velocity);
+            groove[target].push(evn);
+            maxTick = Math.max(maxTick, (evn.startTick || 0) + (evn.durationTicks || 0));
         });
-
-        importedNotes += notes.length;
-        groove[targetChannel] = [...(groove[targetChannel] || []), ...notes].sort(sortByTick);
     });
 
-    if (importedNotes === 0) {
-        throw new Error("No playable notes were found in this MIDI file.");
-    }
-
-    groove.totalBars = Math.max(4, Math.ceil(maxTick / TICKS_PER_BAR));
-    groove.meta = { importedNotes, sourcePpq: midi.header?.ppq || INTERNAL_PPQ, sourceFile: file.name };
-
+    groove.totalBars = Math.max(8, Math.ceil(maxTick / 1920) + 1);
+    const totalNotes = ELITE_16_CHANNELS.reduce((s, ch) => s + (groove[ch] as NoteEvent[]).length, 0);
+    if (!totalNotes) throw new Error('הקובץ לא מכיל תווים שאפשר להשמיע.');
     return { groove: groove as GrooveObject };
 };

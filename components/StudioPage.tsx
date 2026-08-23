@@ -8,7 +8,6 @@ import { MidiVisualizer } from './MidiVisualizer';
 import { downloadFullArrangementMidi, importMidiAsGroove } from '../services/midiService';
 import { ArrowLeft, Play, Pause, Maximize2, Minimize2, Plus, FastForward, Columns, Rows, ZoomIn, ZoomOut, FilePlus, Download } from 'lucide-react';
 import { theoryEngine } from '../services/theoryEngine';
-import * as Tone from 'tone';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
 
 interface StudioPageProps {
@@ -42,16 +41,31 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const [focusTick, setFocusTick] = useState<number | undefined>(0);
     
     const [showVisualizer, setShowVisualizer] = useState(window.innerWidth >= 768);
-    const [showSidebar, setShowSidebar] = useState(true); 
-    const [showBottomEditor, setShowBottomEditor] = useState(true);
+    const [showSidebar, setShowSidebar] = useState(window.innerWidth >= 768);
+    const [showBottomEditor, setShowBottomEditor] = useState(window.innerWidth >= 768);
     const [isAudioInitialized, setIsAudioInitialized] = useState(false);
     const [timelineZoom, setTimelineZoom] = useState(window.innerWidth < 768 ? 40 : 120);
+    const [playError, setPlayError] = useState<string | null>(null);
+    const [loadedNotes, setLoadedNotes] = useState(0);
+    const grooveRef = useRef(groove);
+    grooveRef.current = groove;
+
+    useEffect(() => {
+        if (!initialGroove) return;
+        if (initialGroove.id === grooveRef.current.id && loadedNotes > 0) return;
+        setGroove(initialGroove);
+        grooveRef.current = initialGroove;
+        setCurrentBpm(initialGroove.bpm || 145);
+        setLoadedNotes(audioService.countNotes(initialGroove));
+        setPlayError(null);
+        setPlaybackTime(0);
+    }, [initialGroove]);
 
     useEffect(() => {
         let raf: number;
         const loop = () => {
-            setPlaybackTime(Tone.Transport.seconds);
-            setIsPlaying(Tone.Transport.state === 'started');
+            setPlaybackTime(audioService.getSeconds());
+            setIsPlaying(audioService.isPlaying());
             raf = requestAnimationFrame(loop);
         };
         raf = requestAnimationFrame(loop);
@@ -61,66 +75,55 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const totalSeconds = (groove.totalBars || 128) * (4 * (60 / currentBpm));
 
     const handleSeek = (time: number) => {
-         Tone.Transport.seconds = Math.max(0, Math.min(time, totalSeconds));
-        setPlaybackTime(Tone.Transport.seconds);
-    };
-
-    const syncEngine = async (g: GrooveObject, bpmOverride?: number) => {
-        if (!isAudioInitialized || Tone.context.state !== 'running') {
-            await audioService.ensureInit();
-            setIsAudioInitialized(true);
+        const t = Math.max(0, Math.min(time, totalSeconds));
+        setPlaybackTime(t);
+        if (audioService.isPlaying()) {
+            void audioService.seek(t);
+            return;
         }
-        const bpm = bpmOverride ?? currentBpm;
-        audioService.setBpm(bpm);
-        await audioService.scheduleSequence({ ...g, bpm });
+        void audioService.playGroove(grooveRef.current, t).then((count) => {
+            setLoadedNotes(count);
+            setPlayError(null);
+        }).catch((err: any) => {
+            setPlayError(err?.message || 'לא מצליחים להריץ קדימה. לחצו Play.');
+        });
     };
 
     const handlePlay = async () => {
-        if (isPlaying) {
+        audioService.arm();
+        if (audioService.isPlaying()) {
             audioService.stop();
-        } else {
-            await syncEngine(groove);
-            audioService.play();
+            return;
+        }
+        setPlayError(null);
+        try {
+            const from = playbackTime > 0.25 && playbackTime < totalSeconds - 0.4 ? playbackTime : 0;
+            const count = await audioService.playGroove(grooveRef.current, from);
+            setLoadedNotes(count);
+        } catch (err: any) {
+            setPlayError(err?.message || 'לא מצליחים להשמיע. לחצו Play שוב.');
         }
     };
 
     const handleAudioRefresh = async () => {
-        console.log("🔄 Sample change detected, refreshing engine...");
-        // Re-syncing the entire engine to ensure the new Sampler is picked up by the Parts
-        await syncEngine(groove);
+        try { await audioService.playGroove(grooveRef.current, 0); } catch {}
     };
 
     const handleImportMidi = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
         try {
+            audioService.stop();
             const { groove: newGroove } = await importMidiAsGroove(file);
-
-            const noteCount = ELITE_16_CHANNELS.reduce((sum, ch) => sum + (((newGroove as any)[ch] || []).length), 0);
-            if (noteCount === 0) {
-                alert("This MIDI file contains no playable notes.");
-                return;
-            }
-
             setGroove(newGroove);
+            grooveRef.current = newGroove;
             onUpdate(newGroove);
             setCurrentBpm(newGroove.bpm || 145);
-
-            // Focus the first channel that actually has content, otherwise the
-            // piano roll opens on an empty track and it looks like nothing loaded.
-            const firstFilled = ELITE_16_CHANNELS.find(ch => ((newGroove as any)[ch] || []).length > 0);
-            if (firstFilled) handleSelectTrack(firstFilled, 0);
-
-            // Rewind: a playhead left past the (usually short) imported material = silence
-            audioService.stop();
-            Tone.Transport.seconds = 0;
             setPlaybackTime(0);
-
-            // Always (re)schedule so pressing Play works immediately
-            await syncEngine(newGroove, newGroove.bpm || 145);
-            console.log(`✅ Imported "${file.name}": ${noteCount} notes, ${newGroove.totalBars} bars @ ${newGroove.bpm} BPM`);
-        } catch (err) {
-            alert("Signal Error: " + err);
+            setLoadedNotes(audioService.countNotes(newGroove));
+            setPlayError(null);
+        } catch (err: any) {
+            setPlayError(err?.message || String(err));
         } finally {
             e.target.value = '';
         }
@@ -142,7 +145,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         const updatedGroove: any = { ...groove, [track]: notes };
         setGroove(updatedGroove);
         onUpdate(updatedGroove);
-        if (isPlaying) await syncEngine(updatedGroove);
+        if (isPlaying) { try { await audioService.playGroove(updatedGroove, 0); } catch {} }
     };
 
     const isResizing = useRef(false);
@@ -171,7 +174,10 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     }, []);
 
     return (
-        <div className="flex flex-col h-full bg-[#050507] text-[#E2E8F0] font-sans overflow-hidden select-none">
+        <div
+            className="flex flex-col h-full bg-[#050507] text-[#E2E8F0] font-sans overflow-hidden select-none"
+            onPointerDown={() => { audioService.arm(); void audioService.unlock(); }}
+        >
             <div className="h-14 md:h-16 shrink-0 bg-[#0A0A0B] border-b border-white/5 flex items-center justify-between px-2 md:px-6 z-[100] shadow-2xl">
                 <div className="flex items-center gap-1 md:gap-4 overflow-hidden">
                     <button onClick={() => { audioService.stop(); onClose(); }} className="p-1.5 md:p-2 bg-white/5 hover:bg-white/10 rounded-lg md:rounded-xl transition-all text-gray-400">
@@ -180,6 +186,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                     <div className="flex flex-col min-w-0">
                         <span className="text-[7px] md:text-[9px] font-black uppercase tracking-[0.1em] md:tracking-[0.3em] text-sky-500 leading-none mb-0.5">STUDIO</span>
                         <h2 className="text-[9px] md:text-sm font-black uppercase tracking-tighter text-white truncate max-w-[60px] md:max-w-[200px]">{groove.name}</h2>
+                        {loadedNotes > 0 && <span className="text-[8px] text-emerald-400 font-bold">{loadedNotes} notes</span>}
                     </div>
                 </div>
                 
@@ -222,7 +229,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                     <StudioArrangement 
                         groove={{...groove, bpm: currentBpm}} activeTrack={activeTrack} 
                         onSelectTrack={handleSelectTrack} playbackTime={playbackTime}
-                        onSeek={() => {}} onUpdateTrack={handleUpdateTrack}
+                        onSeek={handleSeek} onUpdateTrack={handleUpdateTrack}
                         onSampleLoad={handleAudioRefresh}
                         showSidebar={showSidebar}
                         pixelsPerBar={timelineZoom}
@@ -283,9 +290,24 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                 </div>
             </div>
 
-            {/* Transport Bar */}
+            {playError && (
+                <div className="px-3 py-2 text-[11px] text-amber-200 bg-amber-500/15 border-t border-amber-500/30 text-center" dir="rtl">{playError}</div>
+            )}
             <div className="h-16 md:h-24 bg-[#0A0A0B] border-t border-white/10 flex flex-col items-center justify-center gap-0.5 shrink-0 pb-safe z-[100] px-2 md:px-6">
-                <input type="range" min="0" max={totalSeconds} step="0.1" value={playbackTime} onChange={(e) => handleSeek(parseFloat(e.target.value))} className="w-full max-w-6xl h-1 bg-zinc-900 rounded-full appearance-none accent-sky-500 cursor-pointer mb-1 md:mb-3" />
+                <input
+                    type="range"
+                    min="0"
+                    max={totalSeconds}
+                    step="0.1"
+                    value={Math.min(playbackTime, totalSeconds)}
+                    onChange={(e) => {
+                        const t = parseFloat(e.target.value);
+                        setPlaybackTime(t);
+                        if (audioService.isPlaying()) void audioService.seek(t);
+                    }}
+                    onPointerUp={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
+                    className="w-full max-w-6xl h-1 bg-zinc-900 rounded-full appearance-none accent-sky-500 cursor-pointer mb-1 md:mb-3"
+                />
                 <div className="flex items-center gap-4 md:gap-12">
                     <button onClick={() => handleSeek(0)} className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/5 text-zinc-500 hover:text-white flex items-center justify-center transition-all">
                         <div className="w-2 h-2 bg-current rounded-sm"></div>
