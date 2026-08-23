@@ -344,8 +344,8 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   const scale = options.scale || analysis.scale;
   const groove = composeProfessionalTrack(
     { bpm, key, scale, genre: options.genre, trackName: options.trackName || `From Audio · ${key} ${scale}` },
-    2,
-    [...ELITE_16_CHANNELS]
+    1,
+    ['ch1_kick', 'ch2_sub', 'ch3_midBass', 'ch4_leadA', 'ch8_snare', 'ch12_hhClosed', 'ch15_pad']
   );
 
   const ratio = bpm / Math.max(80, analysis.bpm);
@@ -402,6 +402,13 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
       return ev(m, n.startTick || 0, 90, 0.84);
     }), 8, Math.max(16, totalBars - 16));
   }
+
+  const PREVIEW_BARS = 32;
+  ELITE_16_CHANNELS.forEach((ch) => {
+    const notes = ((groove as any)[ch] || []) as NoteEvent[];
+    (groove as any)[ch] = notes.filter((n) => (n.startTick || 0) < PREVIEW_BARS * 1920).slice(0, 240);
+  });
+  groove.totalBars = PREVIEW_BARS;
 
   groove.meta = {
     ...(groove.meta || {}),

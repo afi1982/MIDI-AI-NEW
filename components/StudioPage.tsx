@@ -65,8 +65,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     useEffect(() => {
         let raf: number;
         const loop = () => {
-            setPlaybackTime(Tone.Transport.seconds);
-            setIsPlaying(Tone.Transport.state === 'started');
+            setPlaybackTime(audioService.getSeconds());
+            setIsPlaying(audioService.isPlaying());
             raf = requestAnimationFrame(loop);
         };
         raf = requestAnimationFrame(loop);
@@ -76,8 +76,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const totalSeconds = (groove.totalBars || 128) * (4 * (60 / currentBpm));
 
     const handleSeek = (time: number) => {
-         Tone.Transport.seconds = Math.max(0, Math.min(time, totalSeconds));
-        setPlaybackTime(Tone.Transport.seconds);
+        setPlaybackTime(time);
     };
 
     const handlePlay = async () => {
@@ -134,7 +133,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         const updatedGroove: any = { ...groove, [track]: notes };
         setGroove(updatedGroove);
         onUpdate(updatedGroove);
-        if (isPlaying) { try { await audioService.playGroove(updatedGroove, Tone.Transport.seconds); } catch {} }
+        if (isPlaying) { try { await audioService.playGroove(updatedGroove, 0); } catch {} }
     };
 
     const isResizing = useRef(false);

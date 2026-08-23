@@ -96,7 +96,7 @@ export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, ac
       if (scrollRef.current) scrollRef.current.scrollTop = e.currentTarget.scrollTop;
   };
 
-  const totalBars = Math.max(groove?.totalBars || 128, 128);
+  const totalBars = Math.max(32, Math.min(64, groove?.totalBars || 32));
   const totalWidth = totalBars * pixelsPerBar;
 
   const toggleMute = (e: React.MouseEvent, key: string) => {

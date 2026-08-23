@@ -1,167 +1,194 @@
-import * as Tone from 'tone';
 import { NoteEvent, GrooveObject } from '../types';
 import { ELITE_16_CHANNELS } from './maestroService';
-import { resetTransport, unlockAudio } from './audioUnlock';
+import { theoryEngine } from './theoryEngine';
+import { unlockAudio } from './audioUnlock';
 
-type Voice = {
-  hit: (note: string, dur: number, time: number, vel: number) => void;
-  dispose: () => void;
-};
+const midiHz = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 
 export class AudioService {
-  private voices: Voice[] = [];
-  private part: Tone.Part | null = null;
   private channelMutes: Record<string, boolean> = {};
+  private nodes: AudioScheduledSourceNode[] = [];
+  private ctx: AudioContext | null = null;
+  private startedAt = 0;
+  private playing = false;
+  private playTimer: number | null = null;
 
   public async unlock() {
-    return unlockAudio();
+    await unlockAudio();
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (!this.ctx || this.ctx.state === 'closed') this.ctx = new AC();
+    if (this.ctx.state !== 'running') await this.ctx.resume();
+    return this.ctx.state === 'running';
   }
 
   public async ensureInit() {
-    await unlockAudio();
+    await this.unlock();
   }
 
-  public setBpm(bpm: number) {
-    Tone.Transport.bpm.value = Math.max(60, Math.min(200, bpm || 145));
-  }
+  public setBpm(_bpm: number) {}
 
   public setChannelMute(track: string, muted: boolean) {
     this.channelMutes[track] = muted;
   }
 
   public async loadCustomSample(_track: string, _file: File) {
-    await unlockAudio();
-  }
-
-  private disposeVoices() {
-    this.voices.forEach((v) => { try { v.dispose(); } catch {} });
-    this.voices = [];
-  }
-
-  private clearPart() {
-    if (this.part) {
-      try { this.part.stop(); } catch {}
-      try { this.part.dispose(); } catch {}
-      this.part = null;
-    }
-  }
-
-  private makeVoices() {
-    this.disposeVoices();
-    const kick = new Tone.MembraneSynth({
-      pitchDecay: 0.05,
-      octaves: 5,
-      oscillator: { type: 'sine' },
-      envelope: { attack: 0.001, decay: 0.32, sustain: 0, release: 0.1 },
-    }).toDestination();
-    kick.volume.value = -2;
-
-    const bass = new Tone.MonoSynth({
-      oscillator: { type: 'sawtooth' },
-      envelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.08 },
-      filterEnvelope: { attack: 0.001, decay: 0.07, sustain: 0.12, baseFrequency: 90, octaves: 2 },
-    }).toDestination();
-    bass.volume.value = -7;
-
-    const drums = new Tone.NoiseSynth({
-      noise: { type: 'white' },
-      envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.03 },
-    }).toDestination();
-    drums.volume.value = -11;
-
-    const lead = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: 'sawtooth' },
-      envelope: { attack: 0.01, decay: 0.14, sustain: 0.28, release: 0.12 },
-    }).toDestination();
-    lead.volume.value = -5;
-
-    const kickV: Voice = {
-      hit: (_n, _d, time, vel) => kick.triggerAttackRelease('C1', 0.2, time, vel),
-      dispose: () => { try { kick.dispose(); } catch {} },
-    };
-    const bassV: Voice = {
-      hit: (n, d, time, vel) => bass.triggerAttackRelease(n, Math.max(0.06, d), time, vel),
-      dispose: () => { try { bass.dispose(); } catch {} },
-    };
-    const drumV: Voice = {
-      hit: (_n, d, time, vel) => drums.triggerAttackRelease(Math.min(0.16, Math.max(0.04, d)), time, vel),
-      dispose: () => { try { drums.dispose(); } catch {} },
-    };
-    const leadV: Voice = {
-      hit: (n, d, time, vel) => lead.triggerAttackRelease(n, Math.max(0.07, d), time, vel),
-      dispose: () => { try { lead.dispose(); } catch {} },
-    };
-    this.voices = [kickV, bassV, drumV, leadV];
-    return { kickV, bassV, drumV, leadV };
-  }
-
-  private voiceFor(track: string, bank: ReturnType<AudioService['makeVoices']>) {
-    if (track === 'ch1_kick') return bank.kickV;
-    if (track.includes('sub') || track.includes('bass')) return bank.bassV;
-    if (track.includes('hh') || track.includes('snare') || track.includes('clap') || track.includes('perc')) return bank.drumV;
-    return bank.leadV;
+    await this.unlock();
   }
 
   public countNotes(groove: GrooveObject) {
     return ELITE_16_CHANNELS.reduce((s, ch) => s + (((groove as any)[ch] || []) as NoteEvent[]).length, 0);
   }
 
-  public async scheduleSequence(groove: GrooveObject) {
-    return this.armGroove(groove);
+  public isPlaying() {
+    return this.playing;
   }
 
-  public async armGroove(groove: GrooveObject) {
-    await unlockAudio();
-    this.clearPart();
-    this.disposeVoices();
-    const bpm = groove.bpm || 145;
-    this.setBpm(bpm);
-    const tickToSec = (ticks: number) => (ticks / 480) * (60 / bpm);
-    const bank = this.makeVoices();
-    const events: { time: number; track: string; note: string; dur: number; vel: number }[] = [];
+  public getSeconds() {
+    if (!this.playing || !this.ctx) return 0;
+    return Math.max(0, this.ctx.currentTime - this.startedAt);
+  }
 
-    ELITE_16_CHANNELS.forEach((track) => {
-      const notes = ((groove as any)[track] as NoteEvent[]) || [];
-      notes.slice(0, 2500).forEach((n) => {
-        const note = Array.isArray(n.note) ? n.note[0] : n.note;
-        if (!note) return;
-        events.push({
-          time: tickToSec(n.startTick || 0),
-          track,
-          note,
-          dur: Math.max(0.05, tickToSec(n.durationTicks || 120)),
-          vel: Math.max(0.35, Math.min(1, n.velocity || 0.8)),
-        });
-      });
+  private stopNodes() {
+    this.nodes.forEach((n) => {
+      try { n.stop(); } catch {}
+      try { n.disconnect(); } catch {}
+    });
+    this.nodes = [];
+    if (this.playTimer) {
+      window.clearTimeout(this.playTimer);
+      this.playTimer = null;
+    }
+    this.playing = false;
+  }
+
+  private tone(ctx: AudioContext, when: number, freq: number, dur: number, gain: number, type: OscillatorType) {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(Math.max(20, freq), when);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.001, gain), when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.04, dur));
+    osc.connect(g);
+    g.connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + Math.max(0.05, dur) + 0.03);
+    this.nodes.push(osc);
+  }
+
+  private kick(ctx: AudioContext, when: number, vel: number) {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, when);
+    osc.frequency.exponentialRampToValueAtTime(45, when + 0.12);
+    g.gain.setValueAtTime(Math.max(0.2, vel) * 0.9, when);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+    osc.connect(g);
+    g.connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + 0.25);
+    this.nodes.push(osc);
+  }
+
+  private noise(ctx: AudioContext, when: number, dur: number, gain: number) {
+    const len = Math.max(64, Math.floor(ctx.sampleRate * dur));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ctx.createBufferSource();
+    const g = ctx.createGain();
+    src.buffer = buf;
+    g.gain.setValueAtTime(gain, when);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    src.connect(g);
+    g.connect(ctx.destination);
+    src.start(when);
+    src.stop(when + dur + 0.02);
+    this.nodes.push(src);
+  }
+
+  public async scheduleSequence(groove: GrooveObject) {
+    return this.playGroove(groove, 0);
+  }
+
+  public async play(_fromSec = 0) {
+    return this.unlock();
+  }
+
+  public async playGroove(groove: GrooveObject, _fromSec = 0) {
+    const ok = await this.unlock();
+    if (!ok || !this.ctx) throw new Error('האודיו נעול. לחצו Play שוב.');
+    this.stopNodes();
+
+    const ctx = this.ctx;
+    const bpm = groove.bpm || 145;
+    const now = ctx.currentTime + 0.06;
+    const tickSec = (ticks: number) => (ticks / 480) * (60 / bpm);
+    const previewBars = 16;
+    const maxTick = previewBars * 1920;
+    let scheduled = 0;
+
+    // Immediate confirmation click so the phone always makes a sound
+    this.kick(ctx, now, 1);
+
+    const take = (ch: string, cap: number) =>
+      ((((groove as any)[ch] || []) as NoteEvent[])
+        .filter((n) => (n.startTick || 0) < maxTick)
+        .slice(0, cap));
+
+    take('ch1_kick', 80).forEach((n) => {
+      if (this.channelMutes.ch1_kick) return;
+      this.kick(ctx, now + tickSec(n.startTick || 0), n.velocity || 0.9);
+      scheduled++;
     });
 
-    if (!events.length) throw new Error('אין תווים להשמעה. ייבאו MIDI או פתחו את התוצאה מהמשימות.');
+    take('ch2_sub', 80).forEach((n) => {
+      if (this.channelMutes.ch2_sub) return;
+      const midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+      this.tone(ctx, now + tickSec(n.startTick || 0), midiHz(midi), Math.max(0.08, tickSec(n.durationTicks || 120)), 0.22, 'sawtooth');
+      scheduled++;
+    });
 
-    this.part = new Tone.Part((time, ev) => {
-      if (this.channelMutes[ev.track]) return;
-      try { this.voiceFor(ev.track, bank).hit(ev.note, ev.dur, time, ev.vel); } catch {}
-    }, events);
-    this.part.start(0);
-    return events.length;
-  }
+    take('ch3_midBass', 60).forEach((n) => {
+      if (this.channelMutes.ch3_midBass) return;
+      const midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+      this.tone(ctx, now + tickSec(n.startTick || 0), midiHz(midi), Math.max(0.07, tickSec(n.durationTicks || 120)), 0.16, 'sawtooth');
+      scheduled++;
+    });
 
-  public async play(fromSec = 0) {
-    await unlockAudio();
-    try { Tone.Transport.stop(); } catch {}
-    Tone.Transport.seconds = Math.max(0, fromSec);
-    Tone.Transport.start('+0.05');
-  }
+    take('ch8_snare', 40).concat(take('ch9_clap', 20)).forEach((n) => {
+      this.noise(ctx, now + tickSec(n.startTick || 0), 0.12, 0.18);
+      scheduled++;
+    });
 
-  public async playGroove(groove: GrooveObject, fromSec = 0) {
-    const count = await this.armGroove(groove);
-    await this.play(fromSec);
-    return count;
+    take('ch12_hhClosed', 80).forEach((n) => {
+      if (this.channelMutes.ch12_hhClosed) return;
+      this.noise(ctx, now + tickSec(n.startTick || 0), 0.04, 0.08);
+      scheduled++;
+    });
+
+    take('ch4_leadA', 120).forEach((n) => {
+      if (this.channelMutes.ch4_leadA) return;
+      const midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+      this.tone(ctx, now + tickSec(n.startTick || 0), midiHz(midi), Math.max(0.1, tickSec(n.durationTicks || 160)), 0.18, 'triangle');
+      scheduled++;
+    });
+
+    this.startedAt = now;
+    this.playing = true;
+    const length = previewBars * 4 * (60 / bpm);
+    this.playTimer = window.setTimeout(() => { this.playing = false; }, length * 1000 + 200);
+
+    return Math.max(1, scheduled);
   }
 
   public stop() {
-    this.clearPart();
-    this.disposeVoices();
-    resetTransport();
+    this.stopNodes();
+  }
+
+  public getSecondsSafe() {
+    return this.getSeconds();
   }
 }
 
