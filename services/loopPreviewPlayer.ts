@@ -1,51 +1,24 @@
 import * as Tone from 'tone';
 import { ChannelKey, NoteEvent } from '../types';
-
-const SILENCE_WAV =
-  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+import { resetTransport, unlockAudio } from './audioUnlock';
 
 type Voice = {
-  trigger: (note: string, duration: string, time: number, velocity: number) => void;
+  trigger: (note: string, duration: number, time: number, velocity: number) => void;
   dispose: () => void;
 };
 
 let voice: Voice | null = null;
-let voiceChannel: ChannelKey | null = null;
 let part: Tone.Part | null = null;
-let unlocked = false;
 
 function noteName(note: NoteEvent['note']): string {
   if (Array.isArray(note)) return note[0];
   return note || 'C4';
 }
 
-function noteTime(note: NoteEvent): string {
-  if (note.time && typeof note.time === 'string') return note.time;
-  const tick = note.startTick || 0;
-  const bar = Math.floor(tick / 1920);
-  const quarter = Math.floor((tick % 1920) / 480);
-  const sixteenth = Math.floor((tick % 480) / 120);
-  return `${bar}:${quarter}:${sixteenth}`;
-}
-
-async function unlockFromGesture() {
-  try {
-    const ping = new Audio(SILENCE_WAV);
-    ping.setAttribute('playsinline', 'true');
-    ping.volume = 0.01;
-    await ping.play().catch(() => undefined);
-  } catch {}
-  await Tone.start();
-  if (Tone.context.state !== 'running') await Tone.context.resume();
-  unlocked = Tone.context.state === 'running';
-  return unlocked;
-}
-
 function disposeVoice() {
   if (voice) {
     try { voice.dispose(); } catch {}
     voice = null;
-    voiceChannel = null;
   }
 }
 
@@ -55,112 +28,59 @@ function makeVoice(channel: ChannelKey): Voice {
     nodes.push(n);
     return n;
   };
+  const dest = () => nodes.forEach((n) => { try { n.dispose(); } catch {} });
 
-  const kick = () => {
+  if (channel === 'ch1_kick') {
     const synth = track(new Tone.MembraneSynth({
       pitchDecay: 0.05,
       octaves: 5,
       oscillator: { type: 'sine' },
-      envelope: { attack: 0.001, decay: 0.38, sustain: 0, release: 0.15 },
+      envelope: { attack: 0.001, decay: 0.35, sustain: 0, release: 0.12 },
     }).toDestination());
-    synth.volume.value = -2;
+    synth.volume.value = -1;
     return {
-      trigger: (_note: string, _d: string, time: number, vel: number) => {
-        synth.triggerAttackRelease('C1', '8n', time, vel);
-      },
-      dispose: () => nodes.forEach((n) => { try { n.dispose(); } catch {} }),
+      trigger: (_n, _d, time, vel) => synth.triggerAttackRelease('C1', 0.22, time, vel),
+      dispose: dest,
     };
-  };
+  }
 
-  const bass = (octave: 'sub' | 'mid') => {
+  if (channel === 'ch2_sub' || channel === 'ch3_midBass') {
     const synth = track(new Tone.MonoSynth({
       oscillator: { type: 'sawtooth' },
-      filter: { Q: 2, type: 'lowpass', rolloff: -24 },
-      envelope: { attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.08 },
-      filterEnvelope: { attack: 0.001, decay: 0.08, sustain: 0.15, baseFrequency: octave === 'sub' ? 80 : 160, octaves: 2.2 },
+      envelope: { attack: 0.005, decay: 0.12, sustain: 0.18, release: 0.08 },
+      filterEnvelope: { attack: 0.001, decay: 0.08, sustain: 0.12, baseFrequency: channel === 'ch2_sub' ? 80 : 180, octaves: 2 },
     }).toDestination());
-    synth.volume.value = octave === 'sub' ? -6 : -8;
+    synth.volume.value = -6;
     return {
-      trigger: (note: string, d: string, time: number, vel: number) => {
-        synth.triggerAttackRelease(note, d, time, vel);
-      },
-      dispose: () => nodes.forEach((n) => { try { n.dispose(); } catch {} }),
+      trigger: (note, d, time, vel) => synth.triggerAttackRelease(note, Math.max(0.06, d), time, vel),
+      dispose: dest,
     };
-  };
+  }
 
-  const noiseHit = (decay: number, vol: number) => {
+  if (channel.includes('hh') || channel.includes('snare') || channel.includes('clap') || channel.includes('perc')) {
     const synth = track(new Tone.NoiseSynth({
       noise: { type: 'white' },
-      envelope: { attack: 0.001, decay, sustain: 0, release: 0.04 },
+      envelope: { attack: 0.001, decay: channel.includes('hh') ? 0.05 : 0.16, sustain: 0, release: 0.03 },
     }).toDestination());
-    synth.volume.value = vol;
+    synth.volume.value = -10;
     return {
-      trigger: (_n: string, _d: string, time: number, vel: number) => {
-        synth.triggerAttackRelease(decay > 0.15 ? '16n' : '32n', time, vel);
-      },
-      dispose: () => nodes.forEach((n) => { try { n.dispose(); } catch {} }),
+      trigger: (_n, d, time, vel) => synth.triggerAttackRelease(Math.min(0.18, Math.max(0.04, d)), time, vel),
+      dispose: dest,
     };
+  }
+
+  const kind = channel.includes('pad') ? 'pad' : channel.includes('acid') ? 'acid' : 'lead';
+  const synth = track(new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: kind === 'pad' ? 'sine' : 'sawtooth' },
+    envelope: kind === 'pad'
+      ? { attack: 0.12, decay: 0.2, sustain: 0.6, release: 0.4 }
+      : { attack: 0.008, decay: 0.12, sustain: 0.25, release: 0.12 },
+  }).toDestination());
+  synth.volume.value = kind === 'pad' ? -8 : -4;
+  return {
+    trigger: (note, d, time, vel) => synth.triggerAttackRelease(note, kind === 'pad' ? 0.8 : Math.max(0.07, d), time, vel),
+    dispose: dest,
   };
-
-  const metal = () => {
-    const synth = track(new Tone.MetalSynth({
-      envelope: { attack: 0.001, decay: 0.08, release: 0.02 },
-      harmonicity: 5.1,
-      modulationIndex: 24,
-      resonance: 3000,
-      octaves: 1.2,
-    }).toDestination());
-    synth.volume.value = -14;
-    return {
-      trigger: (_n: string, _d: string, time: number, vel: number) => {
-        synth.triggerAttackRelease('32n', time, vel);
-      },
-      dispose: () => nodes.forEach((n) => { try { n.dispose(); } catch {} }),
-    };
-  };
-
-  const lead = (kind: 'hero' | 'support' | 'arp' | 'acid' | 'pad' | 'fx') => {
-    const type = kind === 'pad' ? 'sine' : kind === 'acid' ? 'sawtooth' : kind === 'arp' ? 'square' : 'sawtooth';
-    const env = kind === 'pad'
-      ? { attack: 0.2, decay: 0.3, sustain: 0.7, release: 0.8 }
-      : kind === 'acid'
-        ? { attack: 0.005, decay: 0.08, sustain: 0.15, release: 0.06 }
-        : { attack: 0.012, decay: 0.14, sustain: 0.28, release: 0.16 };
-    const synth = track(new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type },
-      envelope: env,
-    }).toDestination());
-    synth.volume.value = kind === 'pad' ? -10 : kind === 'support' ? -8 : -5;
-    return {
-      trigger: (note: string, d: string, time: number, vel: number) => {
-        const dur = kind === 'pad' ? '2n' : d;
-        synth.triggerAttackRelease(note, dur, time, vel);
-      },
-      dispose: () => nodes.forEach((n) => { try { n.dispose(); } catch {} }),
-    };
-  };
-
-  if (channel === 'ch1_kick') return kick();
-  if (channel === 'ch2_sub') return bass('sub');
-  if (channel === 'ch3_midBass') return bass('mid');
-  if (channel === 'ch8_snare' || channel === 'ch9_clap') return noiseHit(0.18, -8);
-  if (channel === 'ch12_hhClosed') return metal();
-  if (channel === 'ch13_hhOpen') return noiseHit(0.22, -12);
-  if (channel === 'ch10_percLoop' || channel === 'ch11_percTribal') return noiseHit(0.1, -10);
-  if (channel === 'ch4_leadA') return lead('hero');
-  if (channel === 'ch5_leadB') return lead('support');
-  if (channel.includes('arp')) return lead('arp');
-  if (channel === 'ch14_acid') return lead('acid');
-  if (channel === 'ch15_pad') return lead('pad');
-  return lead('fx');
-}
-
-function getVoice(channel: ChannelKey) {
-  if (voice && voiceChannel === channel) return voice;
-  disposeVoice();
-  voice = makeVoice(channel);
-  voiceChannel = channel;
-  return voice;
 }
 
 function clearPart() {
@@ -173,11 +93,11 @@ function clearPart() {
 
 export const loopPreviewPlayer = {
   async unlock() {
-    return unlockFromGesture();
+    return unlockAudio();
   },
 
   isUnlocked() {
-    return unlocked && Tone.context.state === 'running';
+    return Tone.context.state === 'running';
   },
 
   contextState() {
@@ -186,41 +106,40 @@ export const loopPreviewPlayer = {
 
   stop() {
     clearPart();
-    try {
-      Tone.Transport.stop();
-      Tone.Transport.position = 0;
-    } catch {}
+    disposeVoice();
+    resetTransport();
   },
 
   async play(notes: NoteEvent[], bpm: number, channel: ChannelKey = 'ch4_leadA') {
-    const ok = await unlockFromGesture();
-    if (!ok) throw new Error('Audio is locked. Tap Play again.');
-
+    await unlockAudio();
     this.stop();
-    const current = getVoice(channel);
-    Tone.Transport.bpm.value = bpm;
+    await unlockAudio();
+
+    const tempo = Math.max(80, Math.min(180, bpm || 145));
+    Tone.Transport.bpm.value = tempo;
+    const tickToSec = (ticks: number) => (ticks / 480) * (60 / tempo);
 
     const events = notes
       .map((n) => ({
-        time: noteTime(n),
+        time: tickToSec(n.startTick || 0),
         note: noteName(n.note),
-        velocity: Math.max(0.35, Math.min(1, n.velocity || 0.85)),
-        duration: !n.durationTicks ? '16n' : n.durationTicks > 700 ? '2n' : n.durationTicks > 400 ? '4n' : n.durationTicks > 180 ? '8n' : '16n',
+        velocity: Math.max(0.4, Math.min(1, n.velocity || 0.85)),
+        duration: Math.max(0.05, tickToSec(n.durationTicks || 120)),
       }))
-      .filter((e) => !!e.note);
+      .filter((e) => !!e.note && Number.isFinite(e.time));
 
-    if (events.length === 0) throw new Error('This loop has no notes to play.');
+    if (!events.length) throw new Error('אין תווים בלולאה הזו.');
+
+    const current = makeVoice(channel);
+    voice = current;
 
     part = new Tone.Part((time, value) => {
-      try {
-        current.trigger(value.note, value.duration, time, value.velocity);
-      } catch {}
+      try { current.trigger(value.note, value.duration, time, value.velocity); } catch {}
     }, events);
-
     part.loop = true;
-    part.loopEnd = '4m';
+    part.loopEnd = 4 * (60 / tempo) * 4;
     part.start(0);
-    Tone.Transport.start('+0.02');
+    Tone.Transport.start('+0.05');
     return events.length;
   },
 };

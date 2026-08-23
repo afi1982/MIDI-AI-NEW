@@ -1,10 +1,7 @@
 import * as Tone from 'tone';
 import { NoteEvent, GrooveObject } from '../types';
 import { ELITE_16_CHANNELS } from './maestroService';
-import { loopPreviewPlayer } from './loopPreviewPlayer';
-
-const SILENCE_WAV =
-  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+import { onAudioReset, resetTransport, unlockAudio } from './audioUnlock';
 
 export class AudioService {
   private samplers: Record<string, any> = {};
@@ -16,21 +13,11 @@ export class AudioService {
   private channelMutes: Record<string, boolean> = {};
 
   public async unlock() {
-    try {
-      const ping = new Audio(SILENCE_WAV);
-      ping.setAttribute('playsinline', 'true');
-      ping.volume = 0.01;
-      await ping.play().catch(() => undefined);
-    } catch {}
-    try { await loopPreviewPlayer.unlock(); } catch {}
-    await Tone.start();
-    if (Tone.context.state !== 'running') await Tone.context.resume();
-    return Tone.context.state === 'running';
+    return unlockAudio();
   }
 
   public async ensureInit() {
-    const ok = await this.unlock();
-    if (!ok) throw new Error('Audio is locked. Tap Play again.');
+    await unlockAudio();
     if (this.initialized) return;
 
     Tone.Transport.PPQ = 480;
@@ -51,6 +38,7 @@ export class AudioService {
     });
 
     this.initialized = true;
+    onAudioReset(() => this.clearAllParts());
   }
 
   private createDefaultSynth(key: string) {
@@ -179,8 +167,8 @@ export class AudioService {
   }
 
   public stop() {
-    try { Tone.Transport.stop(); } catch {}
-    Tone.Transport.position = 0;
+    this.clearAllParts();
+    resetTransport();
     ELITE_16_CHANNELS.forEach((k) => {
       const synth = this.samplers[k];
       try { if (synth && typeof synth.releaseAll === 'function') synth.releaseAll(); } catch {}

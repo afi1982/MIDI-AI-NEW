@@ -123,18 +123,19 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
 
     const playNotes = async (notes: NoteEvent[]) => {
         if (!notes.length) {
-            setAudioError('No notes in this loop.');
+            setAudioError('אין תווים בלולאה. לחצו New loop.');
             return;
         }
         setAudioError(null);
         try {
+            await loopPreviewPlayer.unlock();
             await loopPreviewPlayer.play(notes, paramsRef.current.bpm, paramsRef.current.channel);
             playingRef.current = true;
             setIsPlaying(true);
         } catch (err: any) {
             playingRef.current = false;
             setIsPlaying(false);
-            setAudioError(err?.message || 'Could not start audio. Tap Play again.');
+            setAudioError(err?.message || 'אין סאונד. לחצו Play loop שוב.');
         }
     };
 
@@ -230,7 +231,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
     const isEngineEnhanced = !!(genMeta && genMeta.enginePatternsActive > 0);
 
     return (
-        <div className="h-full flex flex-col bg-[#050508] text-white" dir="ltr">
+        <div className="h-full flex flex-col bg-[#050508] text-white" dir="ltr" onPointerDown={() => { void loopPreviewPlayer.unlock(); }}>
             <header className="h-14 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-3 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                     <button onClick={() => { stopPlayback(); onClose(); }} className="p-2 hover:bg-white/10 rounded-full text-gray-400">
