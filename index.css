@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color-scheme: dark;
   --app-safe-top: env(safe-area-inset-top, 0px);
