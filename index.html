@@ -1,56 +1,25 @@
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MIDI AI</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script async src="https://ga.jspm.io/npm:es-module-shims@1.8.0/dist/es-module-shims.js"></script>
-  <!-- Google Identity Services -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-  
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react-dom": "https://esm.sh/react-dom@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
-    "lucide-react": "https://esm.sh/lucide-react@0.454.0?deps=react@18.2.0",
-    "tone": "https://esm.sh/tone@14.7.77",
-    "jszip": "https://esm.sh/jszip@3.10.1",
-    "midi-writer-js": "https://esm.sh/midi-writer-js@2.1.4",
-    "react-dropzone": "https://esm.sh/react-dropzone@14.2.3?deps=react@18.2.0",
-    "@tonejs/midi": "https://esm.sh/@tonejs/midi@2.0.28",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
-    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
-    "react/": "https://esm.sh/react@18.2.0/"
-  }
-}
-</script>
-<style>
-  /* Fadr-style Scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #000; 
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #333; 
-    border-radius: 10px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #555; 
-  }
-</style>
-<link rel="stylesheet" href="/index.css">
-</head>
-<body class="bg-black text-white m-0 overflow-hidden h-screen antialiased selection:bg-fuchsia-500 selection:text-white">
-  <div id="root"></div>
-  <script type="module" src="./index.tsx"></script>
-<script type="module" src="/index.tsx"></script>
-</body>
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f5ef" />
+    <meta
+      name="description"
+      content="EchoLearn הופך שיעורים, פגישות וסרטונים לסיכומים, כתוביות ופרוטוקולים — בעברית וב־15 שפות."
+    />
+    <meta property="og:locale" content="he_IL" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="EchoLearn — הופכים הקלטות לידע" />
+    <meta
+      property="og:description"
+      content="סיכום הרצאות, כתוביות לסרטונים ופרוטוקולים לפגישות — ישירות מהדפדפן."
+    />
+    <title>EchoLearn — הופכים הקלטות לידע</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%232768ff'/%3E%3Cpath d='M18 34v-8M27 42V18M36 38V22M45 34v-8' stroke='white' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>
