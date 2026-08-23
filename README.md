@@ -10,11 +10,12 @@ View your app in AI Studio: https://ai.studio/apps/83ac666f-22b9-4cbe-b476-dcaf4
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js 18+
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY` to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+The Vite server binds to `0.0.0.0:5173` and allows preview hosts, so the UI loads in local and sandboxed environments. The app still boots without an API key; AI generation calls will fail until one is set.
