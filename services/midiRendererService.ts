@@ -1,4 +1,5 @@
 import { Midi } from '@tonejs/midi';
+import { loadMidiFile } from './midiFileService';
 import { Mp3Encoder } from '@breezystack/lamejs';
 import { inspectAudioBlob, QualityReport } from './qualityGateService';
 
@@ -76,7 +77,7 @@ class MidiRendererService {
 
   public async renderToAudio(midiFile: File, profile: RenderProfile, onProgress: (p: number) => void): Promise<RenderResult> {
     onProgress(4);
-    const midi = new Midi(await midiFile.arrayBuffer());
+    const { midi } = await loadMidiFile(midiFile);
     const events = this.collect(midi);
     if (!events.length) throw new Error('אין תווים ב-MIDI. בחרו קובץ עם ערוצים מלאים.');
 

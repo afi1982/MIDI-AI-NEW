@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { midiAcceptFor } from '../services/audioFilePicker';
 import { STYLE_PROFILES, rollbackProfile, resetProfileToFactory, StyleProfileKey } from '../services/profileService';
 import { midiAI, MidiAnalysis, LearnedStyle } from '../services/aiMidiAnalyzer';
 import { Cpu, Upload, Zap, TrendingUp, AlertCircle, CheckCircle, Download } from 'lucide-react';
@@ -193,7 +194,7 @@ const EngineOptimizationDashboard: React.FC<EngineOptimizationDashboardProps> = 
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept=".mid,.midi"
+                                    accept={midiAcceptFor()}
                                     multiple
                                     onChange={handleFileUpload}
                                     className="hidden"

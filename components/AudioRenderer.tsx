@@ -1,5 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { midiDropzoneAccept } from '../services/audioFilePicker';
 import { useDropzone } from 'react-dropzone';
 import {
     Upload, Download, Loader2, Music, CheckCircle, ArrowLeft, Layers, ShieldCheck,
@@ -46,7 +47,7 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'audio/midi': ['.mid', '.midi'], 'audio/x-midi': ['.mid', '.midi'] },
+        accept: midiDropzoneAccept(),
         maxFiles: 1,
         multiple: false,
         useFsAccessApi: false,

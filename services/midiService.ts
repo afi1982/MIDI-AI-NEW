@@ -1,5 +1,6 @@
 
 import { Midi } from '@tonejs/midi';
+import { loadMidiFile } from './midiFileService';
 import { GrooveObject, NoteEvent, ChannelKey, ScaleType } from '../types.ts';
 import MidiWriter from 'midi-writer-js'; 
 import { ELITE_16_CHANNELS } from './maestroService';
@@ -252,8 +253,7 @@ const resolveImportChannel = (trackName: string, channelIndex: number, midiNum?:
 };
 
 export const importMidiNotesToTrack = async (file: File): Promise<NoteEvent[]> => {
-    const arrayBuffer = await file.arrayBuffer();
-    const midi = new Midi(arrayBuffer);
+    const { midi } = await loadMidiFile(file);
     const ppq = midi.header.ppq || 480;
     const events: NoteEvent[] = [];
     midi.tracks.forEach((track) => {
@@ -265,9 +265,9 @@ export const importMidiNotesToTrack = async (file: File): Promise<NoteEvent[]> =
 };
 
 export const importMidiAsGroove = async (file: File): Promise<{ groove: GrooveObject }> => {
-    const arrayBuffer = await file.arrayBuffer();
-    const midi = new Midi(arrayBuffer);
+    const { midi, info } = await loadMidiFile(file);
     const ppq = midi.header.ppq || 480;
+    if (info.repaired.length) console.warn(`[MIDI] "${file.name}" needed repair:`, info.repaired);
     const bpm = Math.round(midi.header.tempos[0]?.bpm || 145);
     const groove: any = {
         id: `IMPORT_${Date.now()}`,

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { midiDropzoneAccept } from '../services/audioFilePicker';
 import { useDropzone } from 'react-dropzone';
 import { MusicGenre } from '../types';
 import { engineProfileService, getEngineLogTxt, getEngineStats, resolveGenreId } from '../services/engineProfileService';
@@ -95,7 +96,7 @@ export const ReferenceLibrary: React.FC<ReferenceLibraryProps> = ({ onClose }) =
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'audio/midi': ['.mid', '.midi'] }
+        accept: midiDropzoneAccept()
     } as any);
 
     return (

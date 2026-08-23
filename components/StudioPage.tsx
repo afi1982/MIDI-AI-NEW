@@ -6,6 +6,8 @@ import { StudioArrangement } from './StudioArrangement';
 import { PianoRollEditor } from './PianoRollEditor';
 import { MidiVisualizer } from './MidiVisualizer';
 import { downloadFullArrangementMidi, importMidiAsGroove } from '../services/midiService';
+import { midiAcceptFor } from '../services/audioFilePicker';
+import { describeMidiError } from '../services/midiFileService';
 import { ArrowLeft, Play, Pause, Maximize2, Minimize2, Plus, FastForward, Columns, Rows, ZoomIn, ZoomOut, FilePlus, Download } from 'lucide-react';
 import { theoryEngine } from '../services/theoryEngine';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
@@ -207,7 +209,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                     <div className="flex items-center gap-1.5 md:gap-3">
                         <label className="flex p-2 md:px-4 md:py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer items-center gap-1 shadow-lg">
                             <FilePlus size={12} /> <span className="hidden md:inline">Import</span>
-                            <input type="file" className="hidden" accept=".mid,.midi" onChange={handleImportMidi} />
+                            <input type="file" className="hidden" accept={midiAcceptFor()} onChange={handleImportMidi} />
                         </label>
                         
                         <button onClick={() => downloadFullArrangementMidi(groove)} className="p-2 md:px-4 md:py-2 bg-white text-black hover:bg-zinc-200 rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all">

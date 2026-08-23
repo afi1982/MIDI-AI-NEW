@@ -58,6 +58,33 @@ export function describeAudioPickError(file: File): string | null {
 }
 
 export const SONG_ACCEPT = '.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus,.mp4,.3gp,.webm';
+
+/**
+ * MIDI accept list. accept=".mid,.midi" alone makes iOS refuse the file with
+ * "The file '1.mid' could not be opened" - the MIME variants must be listed too,
+ * and on phones we drop `accept` entirely (same lesson as the audio picker).
+ */
+export const MIDI_ACCEPT = [
+  '.mid', '.midi', '.kar', '.rmi',
+  'audio/midi', 'audio/mid', 'audio/x-midi', 'audio/x-mid',
+  'application/x-midi', 'application/midi',
+].join(',');
+
+export function midiAcceptFor(): string | undefined {
+  return isPhoneFilePicker() ? undefined : MIDI_ACCEPT;
+}
+
+/** react-dropzone accept map for MIDI. Undefined on phones so nothing is filtered out. */
+export function midiDropzoneAccept(): Record<string, string[]> | undefined {
+  if (isPhoneFilePicker()) return undefined;
+  const exts = ['.mid', '.midi', '.kar', '.rmi'];
+  return {
+    'audio/midi': exts,
+    'audio/mid': exts,
+    'audio/x-midi': exts,
+    'application/x-midi': exts,
+  };
+}
 export const ALL_FILES_ACCEPT = '*/*';
 
 export function openNativeFilePicker(accept: string, onFile: (file: File) => void) {

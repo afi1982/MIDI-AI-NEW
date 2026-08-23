@@ -4,6 +4,8 @@ import { GrooveObject, NoteEvent, ChannelKey } from '../types';
 import { Volume2, VolumeX, Waves, GripVertical, FileMusic, Copy, Trash2 } from 'lucide-react';
 import { audioService } from '../services/audioService';
 import { importMidiNotesToTrack } from '../services/midiService';
+import { midiAcceptFor } from '../services/audioFilePicker';
+import { describeMidiError } from '../services/midiFileService';
 
 interface StudioArrangementProps {
   groove: GrooveObject;
@@ -121,7 +123,7 @@ export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, ac
           const currentNotes = (groove as any)[trackKey] || [];
           onUpdateTrack(trackKey, [...currentNotes, ...newNotes]);
       } catch (err) {
-          alert("MIDI Signal Error: " + err);
+          alert(describeMidiError(err));
       } finally {
           setLoadingTrack(null);
           e.target.value = '';
@@ -251,7 +253,7 @@ export const StudioArrangement: React.FC<StudioArrangementProps> = ({ groove, ac
                                         </label>
                                         <label className="p-1.5 rounded bg-black border border-white/10 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 cursor-pointer transition-all" title="Import MIDI Clip">
                                             <FileMusic size={13} />
-                                            <input type="file" className="hidden" accept=".mid,.midi" onChange={(e) => handleImportMidiToTrack(e, key)} />
+                                            <input type="file" className="hidden" accept={midiAcceptFor()} onChange={(e) => handleImportMidiToTrack(e, key)} />
                                         </label>
                                     </div>
                                 )}

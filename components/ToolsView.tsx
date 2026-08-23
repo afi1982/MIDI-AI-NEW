@@ -7,7 +7,7 @@ import { Midi } from '@tonejs/midi';
 import { theoryEngine } from '../services/theoryEngine';
 import { jobQueueService } from '../services/jobQueueService';
 import { downloadFullArrangementMidi } from '../services/midiService';
-import { describeAudioPickError, DESKTOP_AUDIO_ACCEPT, isPhoneFilePicker } from '../services/audioFilePicker';
+import { describeAudioPickError, DESKTOP_AUDIO_ACCEPT, isPhoneFilePicker, midiDropzoneAccept } from '../services/audioFilePicker';
 
 interface ToolsViewProps {
   onAnalyzeStart: (file: File) => void;
@@ -150,7 +150,7 @@ const ToolsView: React.FC<ToolsViewProps> = ({ onAnalyzeStart, studyState, onInj
 
     const { getRootProps: getForensicRoot, getInputProps: getForensicInput, isDragActive: isForensicDrag } = useDropzone({
         onDrop: onForensicDrop,
-        accept: { 'audio/midi': ['.mid', '.midi'] },
+        accept: midiDropzoneAccept(),
         maxFiles: 1
     } as any);
 
