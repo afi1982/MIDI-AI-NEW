@@ -209,19 +209,50 @@ function whiten(mag: Float32Array) {
 }
 
 const HARM_W = [1, 0.84, 0.7, 0.55, 0.4, 0.28];
+const ODD_SUPPORT_MIN = 0.75;
+
+/**
+ * Peak magnitude within +-`cents` of a target frequency.
+ * A singer's vibrato moves the partial by up to ~70 cents, so probing a single
+ * FFT bin loses the harmonic entirely - which is what pushed the tracker onto
+ * the octave-below ghost.
+ */
+function magAround(mag: Float32Array, nfft: number, sr: number, hz: number, cents = 55) {
+  const lo = hz * Math.pow(2, -cents / 1200);
+  const hi = hz * Math.pow(2, cents / 1200);
+  const b0 = Math.max(1, Math.floor((lo * nfft) / sr));
+  const b1 = Math.min(mag.length - 2, Math.ceil((hi * nfft) / sr));
+  let best = 0;
+  for (let b = b0; b <= b1; b++) if (mag[b] > best) best = mag[b];
+  // never worse than the interpolated point value
+  return Math.max(best, magAt(mag, nfft, sr, hz));
+}
 
 function salienceAt(spec: Float32Array, nfft: number, sr: number, midi: number) {
   const f = midiToHz(midi);
   if (f < 20 || f > sr / 2 - 40) return 0;
+
   let s = 0;
+  let odd = 0;   // f, 3f, 5f
+  let even = 0;  // 2f, 4f, 6f
   for (let h = 1; h <= HARM_W.length; h++) {
-    const m = magAt(spec, nfft, sr, f * h);
+    const m = magAround(spec, nfft, sr, f * h);
     if (m <= 0) continue;
     s += HARM_W[h - 1] * m;
+    if (h % 2 === 1) odd += m; else even += m;
   }
-  const half = magAt(spec, nfft, sr, f * 0.5);
-  const fund = magAt(spec, nfft, sr, f);
-  if (half > fund * 0.85 && midi - 12 >= LEAD_MIN) s *= 0.42;
+
+  /* Octave-below ghost rejection.
+   * A candidate an octave under the real note collects all of the real
+   * partials on its EVEN harmonics while its odd harmonics (f, 3f, 5f) have
+   * nothing to sit on. A genuine tone always keeps strong odd support.
+   *
+   * NOTE: the previous rule did the opposite - it penalised a candidate
+   * whenever energy existed an octave BELOW it, so any bass note or drone
+   * under the melody dragged the transcription down an octave.
+   */
+  if (even > 0 && odd < even * ODD_SUPPORT_MIN) s *= 0.33;
+
   return s;
 }
 
@@ -314,6 +345,20 @@ function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: 
     k = bt[t][k];
   }
 
+  /* Octave continuity pass.
+   * Shifting a frame by an octave just because the previous frame was closer
+   * that way invents octave errors: one sustained drone at the start used to
+   * drag an entire melody down an octave. An octave jump is only applied when
+   * the spectrum ACTUALLY supports the alternative for that frame.
+   */
+  const supportFor = (t: number, midi: number) => {
+    const list = cands[t] || [];
+    const best = list[0]?.s || 0;
+    if (best <= 0) return 0;
+    const hit = list.find((c) => Math.abs(c.m - midi) < 0.7);
+    return hit ? hit.s / best : 0;
+  };
+
   let last = -1;
   const medianWin: number[] = [];
   for (let t = 0; t < T; t++) {
@@ -321,16 +366,18 @@ function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: 
     if (last >= 0) {
       const down = path[t] - 12;
       const up = path[t] + 12;
-      if (down >= LEAD_MIN && Math.abs(down - last) + 1.2 < Math.abs(path[t] - last)) path[t] = down;
-      else if (up <= LEAD_MAX && Math.abs(up - last) + 1.2 < Math.abs(path[t] - last)) path[t] = up;
+      const closerDown = down >= LEAD_MIN && Math.abs(down - last) + 1.2 < Math.abs(path[t] - last);
+      const closerUp = up <= LEAD_MAX && Math.abs(up - last) + 1.2 < Math.abs(path[t] - last);
+      if (closerDown && supportFor(t, down) > 0.55) path[t] = down;
+      else if (closerUp && supportFor(t, up) > 0.55) path[t] = up;
     }
     if (medianWin.length >= 12) {
       const mid = medianWin.slice().sort((a, b) => a - b)[Math.floor(medianWin.length / 2)];
       if (Math.abs(path[t] - mid) > 9) {
         const d = path[t] - 12;
         const u = path[t] + 12;
-        if (Math.abs(d - mid) < Math.abs(path[t] - mid) && d >= LEAD_MIN) path[t] = d;
-        else if (Math.abs(u - mid) < Math.abs(path[t] - mid) && u <= LEAD_MAX) path[t] = u;
+        if (Math.abs(d - mid) < Math.abs(path[t] - mid) && d >= LEAD_MIN && supportFor(t, d) > 0.5) path[t] = d;
+        else if (Math.abs(u - mid) < Math.abs(path[t] - mid) && u <= LEAD_MAX && supportFor(t, u) > 0.5) path[t] = u;
       }
     }
     last = path[t];
@@ -468,35 +515,94 @@ function median(xs: number[]) {
 export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
   const voiced = frames.filter((f) => f.voiced && Number.isFinite(f.m));
   if (!voiced.length) return [];
-  const notes: NoteEvent[] = [];
-  let group = [voiced[0]];
+
   const hop = frames.length > 1 ? Math.max(0.008, frames[1].t - frames[0].t) : 0.012;
+  const sixteenthSec = 60 / bpm / 4;
+  const framesPerSlot = Math.max(1, sixteenthSec / hop);
 
-  const flush = () => {
-    if (!group.length) return;
-    const hold = group[group.length - 1].t - group[0].t + hop;
-    if (hold < 0.04) { group = []; return; }
-    const inner = group.slice(Math.floor(group.length * 0.15), Math.max(1, Math.ceil(group.length * 0.85)));
-    const pitch = median((inner.length ? inner : group).map((g) => g.m));
-    const vel = Math.min(1, group.reduce((a, g) => a + g.v, 0) / group.length);
-    const bend = (pitch - Math.round(pitch)) * 4096;
-    notes.push(ev(pitch, secToTick(group[0].t, bpm), (hold * bpm * 480) / 60, vel, bend));
-    group = [];
-  };
+  /* Per-slot pitch voting.
+   * Segmenting the raw contour note-by-note is hopeless on real material:
+   * vibrato makes the tracker oscillate between neighbouring semitones and the
+   * melody shatters into an A4/G#4/A4 stutter. Instead every 1/16 slot votes
+   * once (median of its frames) and equal neighbours merge into one note - the
+   * result is stable AND already aligned to a musical grid for the DAW.
+   */
+  const slots = new Map<number, { pitches: number[]; vels: number[] }>();
+  for (const f of voiced) {
+    const slot = Math.round(f.t / sixteenthSec);
+    let bucket = slots.get(slot);
+    if (!bucket) { bucket = { pitches: [], vels: [] }; slots.set(slot, bucket); }
+    bucket.pitches.push(f.m);
+    bucket.vels.push(f.v);
+  }
 
-  for (let i = 1; i < voiced.length; i++) {
-    const cur = voiced[i];
-    const last = group[group.length - 1];
-    const same = Math.abs(cur.m - last.m) < 0.72;
-    const close = cur.t - last.t < hop * 2.4;
-    if (same && close) group.push(cur);
-    else {
-      flush();
-      group = [cur];
+  type Slot = { slot: number; midi: number; vel: number; bend: number };
+  const voted: Slot[] = [];
+  const slotKeys = [...slots.keys()].sort((a, b) => a - b);
+  for (const key of slotKeys) {
+    const bucket = slots.get(key)!;
+    // a slot needs real coverage, otherwise it is a transient artefact
+    if (bucket.pitches.length < Math.max(2, framesPerSlot * 0.35)) continue;
+    const pitch = median(bucket.pitches);
+    const vel = bucket.vels.reduce((a, b) => a + b, 0) / bucket.vels.length;
+    voted.push({ slot: key, midi: pitch, vel, bend: (pitch - Math.round(pitch)) * 4096 });
+  }
+  if (!voted.length) return [];
+
+  // Remove single-slot spikes that sit between two slots of the same pitch
+  for (let i = 1; i < voted.length - 1; i++) {
+    const prev = voted[i - 1], cur = voted[i], next = voted[i + 1];
+    if (prev.slot + 1 === cur.slot && cur.slot + 1 === next.slot &&
+        Math.round(prev.midi) === Math.round(next.midi) &&
+        Math.round(cur.midi) !== Math.round(prev.midi)) {
+      cur.midi = prev.midi;
     }
   }
-  flush();
-  return notes;
+
+  // Merge consecutive slots carrying the same semitone
+  type Built = { midi: number; slot: number; lenSlots: number; vel: number; bend: number };
+  const built: Built[] = [];
+  for (const v of voted) {
+    const prev = built[built.length - 1];
+    if (prev && Math.round(prev.midi) === Math.round(v.midi) && prev.slot + prev.lenSlots === v.slot) {
+      prev.lenSlots += 1;
+      prev.vel = Math.max(prev.vel, v.vel);
+      continue;
+    }
+    built.push({ midi: v.midi, slot: v.slot, lenSlots: 1, vel: v.vel, bend: v.bend });
+  }
+
+  // Monophonic: never let a note run into the next one
+  for (let i = 0; i < built.length - 1; i++) {
+    const maxLen = built[i + 1].slot - built[i].slot;
+    if (maxLen > 0) built[i].lenSlots = Math.min(built[i].lenSlots, maxLen);
+  }
+
+  const ticksPerSlot = 120; // 1/16 note at 480 PPQ
+  return built
+    .filter((b) => b.lenSlots >= 1)
+    .map((b) => ev(b.midi, b.slot * ticksPerSlot, b.lenSlots * ticksPerSlot, b.vel, b.bend));
+}
+
+/**
+ * Median filter over the pitch contour (~100ms). Vibrato swings +-0.6 semitone
+ * at 5-7Hz; without smoothing the note segmenter shatters every sustained note
+ * into an A4/G#4/A4 stutter.
+ */
+function smoothContour(path: number[], win: number): number[] {
+  const out = path.slice();
+  const half = Math.max(1, Math.floor(win / 2));
+  for (let i = 0; i < path.length; i++) {
+    if (path[i] < 0) continue;
+    const window: number[] = [];
+    for (let j = Math.max(0, i - half); j <= Math.min(path.length - 1, i + half); j++) {
+      if (path[j] >= 0) window.push(path[j]);
+    }
+    if (window.length < 3) continue;
+    window.sort((a, b) => a - b);
+    out[i] = window[Math.floor(window.length / 2)];
+  }
+  return out;
 }
 
 export function trackMelodyFromSpectrum(
@@ -505,7 +611,9 @@ export function trackMelodyFromSpectrum(
   flux: number[],
   hopSec: number,
 ): PitchFrame[] {
-  const path = viterbiTrack(cands, rms, flux);
+  const raw = viterbiTrack(cands, rms, flux);
+  const win = Math.max(3, Math.round(0.1 / Math.max(0.004, hopSec)));
+  const path = smoothContour(raw, win);
   return path.map((m, i) => ({
     t: i * hopSec,
     m,
@@ -1015,6 +1123,14 @@ export async function analyzeBufferToStems(
     if (!p.voiced) return;
     hist[((Math.round(p.m) % 12) + 12) % 12] += p.v;
   });
+  // Chords carry far more key information than a melody contour does
+  const melodyWeight = hist.reduce((a, b) => a + b, 0) || 1;
+  chords.forEach((c) => {
+    const dur = Math.max(0.1, c.endSec - c.startSec);
+    c.tones.forEach((m, i) => {
+      hist[((m % 12) + 12) % 12] += (melodyWeight * 0.03) * dur * (i === 0 ? 1.4 : 1);
+    });
+  });
   const guessed = chromaKey(hist);
   const key = override?.key || guessed.key;
   const scale = override?.scale || guessed.scale;
@@ -1185,6 +1301,38 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     groove.ch15_pad = longPads.map((n: NoteEvent) => {
       const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
       return ev(m > 70 ? m - 12 : m, n.startTick || 0, Math.max(480, n.durationTicks || 480), 0.26);
+    });
+  }
+
+  /* --- Key-aware pitch repair -------------------------------------------
+   * Semitone slips (vibrato pulling a note onto its neighbour) are the most
+   * audible transcription error. If the transcription already agrees with the
+   * detected key, the few outliers are almost certainly mistakes - snap them.
+   * If it does NOT agree, the key estimate is the unreliable part: leave the
+   * notes untouched rather than "correcting" a correct melody.
+   */
+  const MELODIC_FIXABLE = ['ch4_leadA', 'ch5_leadB', 'ch6_arpA'];
+  const scaleNotes = new Set(
+    theoryEngine.getScaleNotes(key, scale).map((nn) => theoryEngine.getMidiNote(`${nn}4`) % 12)
+  );
+  if (scaleNotes.size >= 5) {
+    MELODIC_FIXABLE.forEach((ch) => {
+      const list = (groove[ch] || []) as NoteEvent[];
+      if (list.length < 8) return;
+      const midis = list.map((nn) => theoryEngine.getMidiNote(Array.isArray(nn.note) ? nn.note[0] : nn.note));
+      const inScale = midis.filter((m) => scaleNotes.has(((m % 12) + 12) % 12)).length;
+      if (inScale / midis.length < 0.62) return; // key estimate not trustworthy
+
+      groove[ch] = list.map((nn, i) => {
+        const m = midis[i];
+        if (scaleNotes.has(((m % 12) + 12) % 12)) return nn;
+        const down = m - 1, up = m + 1;
+        const dIn = scaleNotes.has(((down % 12) + 12) % 12);
+        const uIn = scaleNotes.has(((up % 12) + 12) % 12);
+        const target = dIn && !uIn ? down : (!dIn && uIn ? up : (dIn && uIn ? (nn.pitchBend || 0) < 0 ? down : up : m));
+        if (target === m) return nn;
+        return ev(target, nn.startTick || 0, nn.durationTicks || 120, nn.velocity || 0.7, 0);
+      });
     });
   }
 
