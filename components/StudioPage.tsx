@@ -42,8 +42,8 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const [focusTick, setFocusTick] = useState<number | undefined>(0);
     
     const [showVisualizer, setShowVisualizer] = useState(window.innerWidth >= 768);
-    const [showSidebar, setShowSidebar] = useState(true); 
-    const [showBottomEditor, setShowBottomEditor] = useState(true);
+    const [showSidebar, setShowSidebar] = useState(window.innerWidth >= 768);
+    const [showBottomEditor, setShowBottomEditor] = useState(window.innerWidth >= 768);
     const [isAudioInitialized, setIsAudioInitialized] = useState(false);
     const [timelineZoom, setTimelineZoom] = useState(window.innerWidth < 768 ? 40 : 120);
 

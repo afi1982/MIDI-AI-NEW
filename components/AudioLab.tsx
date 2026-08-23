@@ -193,13 +193,14 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
             <div className="flex-1 p-4 md:p-8 overflow-y-auto custom-scrollbar">
                 {!activeJob ? (
                     <div className="max-w-4xl mx-auto space-y-8">
-                        <div {...getRootProps()} className={`w-full h-96 border-2 border-dashed rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] transition-all ${isDragActive ? 'border-blue-500 bg-blue-500/5 shadow-2xl' : 'border-white/10 hover:border-white/20 shadow-xl'}`}>
+                        <div {...getRootProps()} className={`w-full min-h-[220px] md:h-96 border-2 border-dashed rounded-3xl md:rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] px-4 py-8 ${isDragActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/10'}`}>
                             <input {...getInputProps()} />
-                            <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center mb-6 border border-blue-500/20">
-                                <AudioWaveform size={48} className={isDragActive ? 'text-blue-400 animate-pulse' : 'text-gray-500'} />
+                            <div className="w-16 h-16 md:w-24 md:h-24 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 border border-blue-500/20">
+                                <AudioWaveform size={32} className={isDragActive ? 'text-blue-400 animate-pulse' : 'text-gray-500'} />
                             </div>
-                            <h3 className="text-2xl font-black uppercase tracking-widest text-white italic">Audio to MIDI</h3>
-                            <p className="text-sm text-gray-500 font-medium mt-4 uppercase text-center max-w-sm">Upload a song to extract a 1:1 monophonic lead melody.</p>
+                            <h3 className="text-lg md:text-2xl font-black uppercase tracking-widest text-white italic text-center">Audio to MIDI</h3>
+                            <p className="text-xs md:text-sm text-gray-500 font-medium mt-3 uppercase text-center max-w-sm">Tap to choose an audio file</p>
+                            <span className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-black uppercase">Choose file</span>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -242,22 +243,22 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                     </div>
                 ) : activeJob.result && (
                     <div className="flex flex-col gap-6 h-full animate-in zoom-in-95 duration-500">
-                        <div className="flex justify-between items-center bg-[#0A0A0C] p-8 rounded-[2.5rem] border border-white/10 shadow-2xl">
-                            <div className="flex gap-12">
-                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Detected Tempo</div><div className="text-3xl font-black font-mono">{activeJob.result.bpm} <span className="text-sm opacity-30">BPM</span></div></div>
-                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Transcription</div><div className="text-3xl font-black font-mono text-blue-400">1:1 <span className="text-xl opacity-60 italic">MONO LEAD</span></div></div>
+                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 bg-[#0A0A0C] p-4 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-white/10 shadow-2xl">
+                            <div className="flex gap-6 md:gap-12">
+                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Detected Tempo</div><div className="text-2xl md:text-3xl font-black font-mono">{activeJob.result.bpm} <span className="text-sm opacity-30">BPM</span></div></div>
+                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Transcription</div><div className="text-2xl md:text-3xl font-black font-mono text-blue-400">1:1 <span className="text-base md:text-xl opacity-60 italic">MONO</span></div></div>
                             </div>
                             <div className="flex items-center gap-6">
                                 <div className="text-right hidden sm:block">
                                     <div className="text-[10px] font-black text-green-500 uppercase">Micro-tonal Bends Included</div>
                                     <div className="text-[9px] text-gray-500 font-mono">RMS Energy Mapping: Active</div>
                                 </div>
-                                <button onClick={() => isPlaying ? audioRef.current?.pause() : audioRef.current?.play()} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-xl hover:scale-105 active:scale-95 ${isPlaying ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
-                                    {isPlaying ? <Pause size={36} fill="currentColor" /> : <Play size={36} fill="currentColor" className="ml-1.5" />}
+                                <button onClick={() => isPlaying ? audioRef.current?.pause() : audioRef.current?.play()} className={`w-14 h-14 md:w-20 md:h-20 self-center rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 ${isPlaying ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
+                                    {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
                                 </button>
                             </div>
                         </div>
-                        <div className="flex-1 min-h-[400px] relative rounded-[3rem] overflow-hidden shadow-2xl border border-white/10">
+                        <div className="flex-1 min-h-[180px] md:min-h-[400px] relative rounded-2xl md:rounded-[3rem] overflow-hidden shadow-2xl border border-white/10">
                             <LabPianoRoll groove={activeJob.result} progress={progress} />
                         </div>
                     </div>

@@ -76,8 +76,8 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
 
     return (
         <div className="h-full flex flex-col bg-[#050508] text-white animate-in fade-in" dir="ltr">
-            <header className="h-16 md:h-20 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-6 shrink-0 z-50">
-                <div className="flex items-center gap-4">
+            <header className="h-14 md:h-20 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-3 md:px-6 shrink-0 z-50">
+                <div className="flex items-center gap-2 md:gap-4 min-w-0">
                     <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-all text-gray-400 hover:text-white">
                         <ArrowLeft size={20} />
                     </button>
@@ -161,18 +161,19 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
                         {!file ? (
                             <div 
                                 {...getRootProps()} 
-                                className={`h-80 md:h-[450px] border-2 border-dashed rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] transition-all group ${
-                                    isDragActive ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-white/10 hover:border-white/20'
+                                className={`min-h-[220px] md:h-[450px] border-2 border-dashed rounded-3xl md:rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] px-4 py-8 ${
+                                    isDragActive ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-white/10'
                                 }`}
                             >
                                 <input {...getInputProps()} />
-                                <div className="w-24 h-24 bg-fuchsia-500/10 rounded-full flex items-center justify-center mb-8 border border-fuchsia-500/20 group-hover:scale-110 transition-transform">
-                                    <Upload className="w-10 h-10 text-fuchsia-500" />
+                                <div className="w-16 h-16 md:w-24 md:h-24 bg-fuchsia-500/10 rounded-full flex items-center justify-center mb-4 border border-fuchsia-500/20">
+                                    <Upload className="w-8 h-8 md:w-10 md:h-10 text-fuchsia-500" />
                                 </div>
-                                <h2 className="text-2xl font-black uppercase italic text-white tracking-tighter">Load MIDI Archive</h2>
-                                <p className="text-sm text-gray-500 font-medium mt-2 max-w-xs text-center px-6 leading-relaxed">
-                                    Drop your MIDI session here to trigger a background MP3/WAV conversion.
+                                <h2 className="text-lg md:text-2xl font-black uppercase italic text-white tracking-tighter text-center">Load MIDI</h2>
+                                <p className="text-xs md:text-sm text-gray-500 font-medium mt-2 max-w-xs text-center px-4">
+                                    Tap to choose a .mid file
                                 </p>
+                                <span className="mt-4 px-4 py-2 rounded-xl bg-fuchsia-600 text-white text-xs font-black uppercase">Choose file</span>
                             </div>
                         ) : (
                             <div className="bg-[#0A0A0C] border border-white/5 rounded-[3rem] p-8 md:p-16 text-center animate-in zoom-in-95 duration-500 shadow-2xl relative overflow-hidden">

@@ -133,8 +133,11 @@ export class AudioService {
                   const vel = event.velocity || 0.7;
                   const dur = event.duration === 'custom' ? (event.durationTicks + "i") : (event.duration || "16n");
                   try {
-                    // Using time parameter is crucial for scheduled precision
-                    synth.triggerAttackRelease(event.note, dur, time, vel);
+                    if (typeof synth.noise !== 'undefined' || synth.name === 'MetalSynth') {
+                      synth.triggerAttackRelease(dur, time, vel);
+                    } else {
+                      synth.triggerAttackRelease(event.note, dur, time, vel);
+                    }
                   } catch (e) {
                       // Silent catch for race condition disposal
                   }
@@ -146,12 +149,20 @@ export class AudioService {
       });
   }
 
-  public play() {
-      Tone.Transport.start();
+  public async play() {
+      await this.ensureInit();
+      if (Tone.context.state !== 'running') {
+          await Tone.start();
+          await Tone.context.resume();
+      }
+      if (Tone.Transport.state !== 'started') {
+          Tone.Transport.start();
+      }
   }
 
   public stop() {
       Tone.Transport.stop();
+      Tone.Transport.position = 0;
   }
 
   private clearAllParts() {
