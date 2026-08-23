@@ -13,6 +13,7 @@ dist-ssr
 *.local
 public/icons/icon-source.png
 public/icons/icon-full.png
+# docs/ is the published static build for the public phone URL
 
 # Editor directories and files
 .vscode/*

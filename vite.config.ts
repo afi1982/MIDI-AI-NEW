@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   const geminiKey = env.GEMINI_API_KEY || env.API_KEY || '';
 
   return {
+    base: './',
     plugins: [react()],
     server: {
       host: '0.0.0.0',

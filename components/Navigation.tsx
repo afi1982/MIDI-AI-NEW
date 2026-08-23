@@ -49,7 +49,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, onChangeVie
   return (
     <header className="h-14 md:h-16 shrink-0 bg-[#08080A] border-b border-white/10 flex items-center justify-between px-3 md:px-6 relative z-[5000] shadow-lg">
       <div className="flex items-center gap-2.5 shrink-0 cursor-pointer" onClick={() => onChangeView('WELCOME')}>
-        <img src="/icons/icon-192.png" alt="MIDI AI" className="w-8 h-8 rounded-lg object-cover shadow-[0_0_15px_rgba(2,132,199,0.4)]" />
+        <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="MIDI AI" className="w-8 h-8 rounded-lg object-cover shadow-[0_0_15px_rgba(2,132,199,0.4)]" />
         <div className="flex flex-col leading-none">
           <span className="text-base md:text-lg font-black tracking-tighter text-white italic">MIDI <span className="text-sky-500">AI</span></span>
           <span className="hidden md:block text-[8px] text-gray-500 font-mono tracking-widest uppercase">Elite AI Engine</span>

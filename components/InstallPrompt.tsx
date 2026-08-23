@@ -11,7 +11,7 @@ export const InstallPrompt: React.FC = () => {
     <div className="fixed inset-x-3 z-[7000] bottom-[calc(5.25rem+env(safe-area-inset-bottom))] md:bottom-6 md:max-w-md md:left-auto md:right-6">
       <div className="rounded-2xl border border-sky-500/30 bg-[#0A0A0C]/95 backdrop-blur-xl shadow-[0_20px_60px_rgba(0,0,0,0.65)] p-3.5 flex items-start gap-3">
         <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/10 bg-black">
-          <img src="/icons/icon-192.png" alt="MIDI AI" className="w-full h-full object-cover" />
+          <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="MIDI AI" className="w-full h-full object-cover" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[11px] font-black uppercase tracking-wide text-white">Install MIDI AI</div>
