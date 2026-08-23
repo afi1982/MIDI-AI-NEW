@@ -190,41 +190,149 @@ export const downloadAnalyzedMidi = async (segments: GrooveObject[]) => {
     await downloadFullArrangementMidi(masterGroove);
 };
 
+/**
+ * Files written by this app (midi-writer-js) use PPQ 128, Audio-To-MIDI / DAW
+ * exports commonly use 96, 192, 384, 480 or 960.
+ * Every tick coming from a file MUST be rescaled to the internal 480 PPQ grid,
+ * otherwise notes are crushed into the first bar with ~20ms durations
+ * (= "the studio plays nothing").
+ */
+const getTickScale = (midi: Midi): number => {
+    const filePpq = midi.header?.ppq || INTERNAL_PPQ;
+    if (!filePpq || filePpq <= 0) return 1;
+    return INTERNAL_PPQ / filePpq;
+};
+
+const MIN_DURATION_TICKS = 60;      // 1/32 note @480ppq - anything shorter is inaudible
+const MIN_VELOCITY = 0.35;          // Audio-To-MIDI often outputs near-zero velocities
+
+const toNoteEvent = (n: any, scale: number): NoteEvent => {
+    const startTick = Math.max(0, Math.round((n.ticks || 0) * scale));
+    const rawDur = Math.round((n.durationTicks || 0) * scale);
+    const durationTicks = Math.max(MIN_DURATION_TICKS, rawDur || 0);
+    const bar = Math.floor(startTick / TICKS_PER_BAR);
+    const beat = Math.floor((startTick % TICKS_PER_BAR) / INTERNAL_PPQ);
+    const sixteen = Math.floor((startTick % INTERNAL_PPQ) / 120);
+    const velocity = Math.min(1, Math.max(MIN_VELOCITY, n.velocity ?? 0.8));
+    return {
+        note: theoryEngine.midiToNote(n.midi),
+        duration: "custom",
+        durationTicks,
+        startTick,
+        time: `${bar}:${beat}:${sixteen}`,
+        velocity
+    } as NoteEvent;
+};
+
 export const importMidiNotesToTrack = async (file: File): Promise<NoteEvent[]> => {
     const arrayBuffer = await file.arrayBuffer();
     const midi = new Midi(arrayBuffer);
+    const scale = getTickScale(midi);
     const events: NoteEvent[] = [];
     midi.tracks.forEach(track => {
-        track.notes.forEach(n => {
-            const bar = Math.floor(n.ticks / 1920);
-            const beat = Math.floor((n.ticks % 1920) / 480);
-            const sixteen = Math.floor((n.ticks % 480) / 120);
-            events.push({ note: theoryEngine.midiToNote(n.midi), duration: "custom", durationTicks: n.durationTicks, startTick: n.ticks, time: `${bar}:${beat}:${sixteen}`, velocity: n.velocity });
-        });
+        track.notes.forEach(n => events.push(toNoteEvent(n, scale)));
     });
-    return events;
+    return events.sort(sortByTick);
+};
+
+const DRUM_CHANNELS: ChannelKey[] = ['ch1_kick', 'ch8_snare', 'ch9_clap', 'ch12_hhClosed', 'ch13_hhOpen', 'ch10_percLoop', 'ch11_percTribal'] as ChannelKey[];
+const MELODIC_FALLBACKS: ChannelKey[] = ['ch4_leadA', 'ch5_leadB', 'ch16_synth', 'ch6_arpA', 'ch7_arpB', 'ch15_pad', 'ch14_acid'] as ChannelKey[];
+const BASS_FALLBACKS: ChannelKey[] = ['ch3_midBass', 'ch2_sub'] as ChannelKey[];
+
+const matchChannelByName = (rawName: string): ChannelKey | null => {
+    const name = (rawName || '').toLowerCase();
+    if (!name) return null;
+    for (const key of ELITE_16_CHANNELS) {
+        const alias = key.split('_')[1].toLowerCase();
+        if (name.includes(key.toLowerCase()) || name.includes(alias)) return key;
+    }
+    // Common DAW / transcription naming
+    if (/kick|bd\b/.test(name)) return 'ch1_kick' as ChannelKey;
+    if (/snare|sd\b/.test(name)) return 'ch8_snare' as ChannelKey;
+    if (/clap/.test(name)) return 'ch9_clap' as ChannelKey;
+    if (/hat|hh/.test(name)) return 'ch12_hhClosed' as ChannelKey;
+    if (/perc|tom|ride|crash/.test(name)) return 'ch10_percLoop' as ChannelKey;
+    if (/sub/.test(name)) return 'ch2_sub' as ChannelKey;
+    if (/bass|808/.test(name)) return 'ch3_midBass' as ChannelKey;
+    if (/pad|string|atmo/.test(name)) return 'ch15_pad' as ChannelKey;
+    if (/arp/.test(name)) return 'ch6_arpA' as ChannelKey;
+    if (/acid|303/.test(name)) return 'ch14_acid' as ChannelKey;
+    if (/lead|melody|vocal|voice|piano|guitar|synth|pluck/.test(name)) return 'ch4_leadA' as ChannelKey;
+    return null;
 };
 
 export const importMidiAsGroove = async (file: File): Promise<{ groove: GrooveObject }> => {
     const arrayBuffer = await file.arrayBuffer();
     const midi = new Midi(arrayBuffer);
+    const scale = getTickScale(midi);
     const bpm = midi.header.tempos[0]?.bpm || 145;
-    const groove: any = { id: `IMPORT_${Date.now()}`, name: file.name.split('.')[0], bpm: Math.round(bpm), key: "C", scale: "Minor", totalBars: Math.ceil(midi.durationTicks / 1920) };
+
+    const groove: any = {
+        id: `IMPORT_${Date.now()}`,
+        name: file.name.replace(/\.(mid|midi)$/i, '') || 'Imported',
+        bpm: Math.round(bpm),
+        key: "C",
+        scale: "Minor",
+        totalBars: 4
+    };
     ELITE_16_CHANNELS.forEach(ch => groove[ch] = []);
-    midi.tracks.forEach((track, i) => {
-        const trackName = track.name.toLowerCase();
-        let targetChannel: ChannelKey | null = null;
-        for (const key of ELITE_16_CHANNELS) { if (trackName.includes(key.toLowerCase()) || trackName.includes(key.split('_')[1].toLowerCase())) { targetChannel = key; break; } }
-        if (!targetChannel && i < ELITE_16_CHANNELS.length) { targetChannel = ELITE_16_CHANNELS[i]; }
-        if (targetChannel) {
-            const notes = track.notes.map(n => {
-                const bar = Math.floor(n.ticks / 1920);
-                const beat = Math.floor((n.ticks % 1920) / 480);
-                const sixteen = Math.floor((n.ticks % 480) / 120);
-                return { note: theoryEngine.midiToNote(n.midi), duration: "custom", durationTicks: n.durationTicks, startTick: n.ticks, time: `${bar}:${beat}:${sixteen}`, velocity: n.velocity };
-            });
-            groove[targetChannel] = [...(groove[targetChannel] || []), ...notes];
+
+    const used = new Set<ChannelKey>();
+    let melodicCursor = 0;
+    let bassCursor = 0;
+    let drumCursor = 0;
+    let maxTick = 0;
+    let importedNotes = 0;
+
+    // Skip empty tracks and the metadata "Conductor" track we write on export
+    const playable = midi.tracks.filter(t =>
+        t.notes.length > 0 && !/conductor|tempo|marker/i.test(t.name || '')
+    );
+
+    playable.forEach(track => {
+        const isPercussion = track.channel === 9 || (track as any).instrument?.percussion;
+        const avgMidi = track.notes.reduce((s, n) => s + n.midi, 0) / track.notes.length;
+
+        let targetChannel = matchChannelByName(track.name) || matchChannelByName((track as any).instrument?.name || '');
+
+        if (!targetChannel) {
+            if (isPercussion) {
+                targetChannel = DRUM_CHANNELS[drumCursor++ % DRUM_CHANNELS.length];
+            } else if (avgMidi < 48) {
+                // Low register -> bass, NEVER onto the kick channel (MembraneSynth = inaudible melody)
+                targetChannel = BASS_FALLBACKS[bassCursor++ % BASS_FALLBACKS.length];
+            } else {
+                targetChannel = MELODIC_FALLBACKS[melodicCursor++ % MELODIC_FALLBACKS.length];
+            }
         }
+
+        // Avoid stacking two different tracks on the same channel when free slots exist
+        if (used.has(targetChannel) && !isPercussion) {
+            const pool = avgMidi < 48 ? BASS_FALLBACKS : MELODIC_FALLBACKS;
+            const free = pool.find(c => !used.has(c));
+            if (free) targetChannel = free;
+        }
+        used.add(targetChannel);
+
+        const notes = track.notes
+            .map(n => toNoteEvent(n, scale))
+            .sort(sortByTick);
+
+        notes.forEach(n => {
+            const end = (n.startTick || 0) + (n.durationTicks || 0);
+            if (end > maxTick) maxTick = end;
+        });
+
+        importedNotes += notes.length;
+        groove[targetChannel] = [...(groove[targetChannel] || []), ...notes].sort(sortByTick);
     });
+
+    if (importedNotes === 0) {
+        throw new Error("No playable notes were found in this MIDI file.");
+    }
+
+    groove.totalBars = Math.max(4, Math.ceil(maxTick / TICKS_PER_BAR));
+    groove.meta = { importedNotes, sourcePpq: midi.header?.ppq || INTERNAL_PPQ, sourceFile: file.name };
+
     return { groove: groove as GrooveObject };
 };

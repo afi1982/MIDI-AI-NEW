@@ -65,13 +65,14 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         setPlaybackTime(Tone.Transport.seconds);
     };
 
-    const syncEngine = async (g: GrooveObject) => {
+    const syncEngine = async (g: GrooveObject, bpmOverride?: number) => {
         if (!isAudioInitialized || Tone.context.state !== 'running') {
             await audioService.ensureInit();
             setIsAudioInitialized(true);
         }
-        audioService.setBpm(currentBpm);
-        await audioService.scheduleSequence({ ...g, bpm: currentBpm });
+        const bpm = bpmOverride ?? currentBpm;
+        audioService.setBpm(bpm);
+        await audioService.scheduleSequence({ ...g, bpm });
     };
 
     const handlePlay = async () => {
@@ -94,10 +95,30 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         if (!file) return;
         try {
             const { groove: newGroove } = await importMidiAsGroove(file);
+
+            const noteCount = ELITE_16_CHANNELS.reduce((sum, ch) => sum + (((newGroove as any)[ch] || []).length), 0);
+            if (noteCount === 0) {
+                alert("This MIDI file contains no playable notes.");
+                return;
+            }
+
             setGroove(newGroove);
             onUpdate(newGroove);
             setCurrentBpm(newGroove.bpm || 145);
-            if (isPlaying) await syncEngine(newGroove);
+
+            // Focus the first channel that actually has content, otherwise the
+            // piano roll opens on an empty track and it looks like nothing loaded.
+            const firstFilled = ELITE_16_CHANNELS.find(ch => ((newGroove as any)[ch] || []).length > 0);
+            if (firstFilled) handleSelectTrack(firstFilled, 0);
+
+            // Rewind: a playhead left past the (usually short) imported material = silence
+            audioService.stop();
+            Tone.Transport.seconds = 0;
+            setPlaybackTime(0);
+
+            // Always (re)schedule so pressing Play works immediately
+            await syncEngine(newGroove, newGroove.bpm || 145);
+            console.log(`✅ Imported "${file.name}": ${noteCount} notes, ${newGroove.totalBars} bars @ ${newGroove.bpm} BPM`);
         } catch (err) {
             alert("Signal Error: " + err);
         } finally {

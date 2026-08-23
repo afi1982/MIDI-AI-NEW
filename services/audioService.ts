@@ -120,6 +120,11 @@ export class AudioService {
       await this.ensureInit();
       this.clearAllParts();
 
+      // Tick-based scheduling ("...i") depends on the transport resolution.
+      if (Tone.Transport.PPQ !== 480) Tone.Transport.PPQ = 480;
+
+      let scheduled = 0;
+
       ELITE_16_CHANNELS.forEach(trackName => {
           const events = (groove as any)[trackName] as NoteEvent[];
           if (!events || !Array.isArray(events) || events.length === 0) return;
@@ -130,20 +135,38 @@ export class AudioService {
               const synth = this.samplers[trackName];
               // CRITICAL: Defensive check to prevent triggers on disposed nodes
               if (synth && !synth.disposed && typeof synth.triggerAttackRelease === 'function' && !this.channelMutes[trackName]) {
-                  const vel = event.velocity || 0.7;
-                  const dur = event.duration === 'custom' ? (event.durationTicks + "i") : (event.duration || "16n");
+                  const vel = Math.min(1, Math.max(0.2, event.velocity || 0.7));
+
+                  // Duration resolution: never emit "undefinedi" (that throws and silences the note)
+                  let dur: any = "16n";
+                  if (event.durationTicks && event.durationTicks > 0) {
+                      dur = Math.max(30, event.durationTicks) + "i";
+                  } else if (event.duration && event.duration !== 'custom') {
+                      dur = event.duration;
+                  }
+
+                  const note = Array.isArray(event.note) ? event.note[0] : event.note;
+
                   try {
-                    // Using time parameter is crucial for scheduled precision
-                    synth.triggerAttackRelease(event.note, dur, time, vel);
+                    // NoiseSynth has the signature (duration, time, velocity) - no pitch argument
+                    if (synth instanceof Tone.NoiseSynth) {
+                        synth.triggerAttackRelease(dur, time, vel);
+                    } else {
+                        // Using time parameter is crucial for scheduled precision
+                        synth.triggerAttackRelease(note, dur, time, vel);
+                    }
                   } catch (e) {
-                      // Silent catch for race condition disposal
+                      console.warn(`[AudioEngine] trigger failed on ${trackName}`, e, event);
                   }
               }
           }, sortedEvents.map(e => ({ ...e, time: (e.startTick || 0) + "i" })));
 
           part.start(0);
           this.parts[trackName] = part;
+          scheduled += sortedEvents.length;
       });
+
+      console.log(`🎹 Scheduled ${scheduled} notes across ${Object.values(this.parts).filter(Boolean).length} channels`);
   }
 
   public play() {
