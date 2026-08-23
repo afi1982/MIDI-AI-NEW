@@ -205,7 +205,7 @@ export const loopPreviewPlayer = {
         time: noteTime(n),
         note: noteName(n.note),
         velocity: Math.max(0.35, Math.min(1, n.velocity || 0.85)),
-        duration: n.durationTicks && n.durationTicks > 180 ? '8n' : '16n',
+        duration: !n.durationTicks ? '16n' : n.durationTicks > 700 ? '2n' : n.durationTicks > 400 ? '4n' : n.durationTicks > 180 ? '8n' : '16n',
       }))
       .filter((e) => !!e.note);
 

@@ -148,46 +148,73 @@ function writePhrase(
   });
 }
 
-function kickPattern(bar: number, energy: EnergyLevel, lastBarsOfBuild: boolean): NoteEvent[] {
+function degMidi(rootMidi: number, scale: number[], deg: number, octaveAdd: number) {
+  const octave = Math.floor(deg / scale.length);
+  const degree = ((deg % scale.length) + scale.length) % scale.length;
+  return rootMidi + scale[degree] + octave * 12 + octaveAdd;
+}
+
+function writeHeld(
+  dest: NoteEvent[],
+  rootMidi: number,
+  scale: number[],
+  deg: number,
+  bar: number,
+  step: number,
+  steps: number,
+  octaveAdd: number,
+  vel: number
+) {
+  dest.push(note(degMidi(rootMidi, scale, deg, octaveAdd), bar, step, steps * TICKS_16 - 8, vel));
+}
+
+function kickPattern(bar: number, energy: EnergyLevel, lastBarsOfBuild: boolean, complex = false): NoteEvent[] {
   const out: NoteEvent[] = [];
-  const kickMidi = 36; // C1
+  const kickMidi = 36;
   for (let s = 0; s < 16; s += 4) {
-    out.push(note(kickMidi, bar, s, 140, energy >= EnergyLevel.PEAK ? 1 : 0.92));
+    out.push(note(kickMidi, bar, s, complex ? 120 : 160, energy >= EnergyLevel.PEAK ? 1 : 0.92));
   }
-  if (lastBarsOfBuild) {
-    out.push(note(kickMidi, bar, 14, 60, 0.55));
+  if (complex) {
+    if (bar % 4 === 3) out.push(note(kickMidi, bar, 14, 50, 0.45));
+    if (bar % 2 === 1) out.push(note(kickMidi, bar, 10, 40, 0.35));
   }
+  if (lastBarsOfBuild) out.push(note(kickMidi, bar, 14, 60, 0.55));
   return out;
 }
 
-function psyBass(bar: number, root: number, octave: number, vary: boolean): NoteEvent[] {
+function psyBass(bar: number, root: number, octave: number, complex: boolean): NoteEvent[] {
   const out: NoteEvent[] = [];
   const base = root + octave * 12;
   for (let beat = 0; beat < 4; beat++) {
     const s0 = beat * 4;
-    // Kick occupies slot 0. Classic rolling 16ths: _ x x X
-    out.push(note(base, bar, s0 + 1, 70, 0.86));
-    if (!(vary && beat === 3)) out.push(note(base, bar, s0 + 2, 70, 0.8));
-    out.push(note(base + (vary && beat % 2 === 1 ? 12 : 0), bar, s0 + 3, 55, 0.9));
+    if (complex) {
+      out.push(note(base, bar, s0 + 1, 65, 0.86));
+      if (!(bar % 4 === 3 && beat === 3)) out.push(note(base, bar, s0 + 2, 65, 0.78));
+      out.push(note(base + (beat % 2 === 1 ? 12 : 0), bar, s0 + 3, 50, 0.92));
+    } else {
+      out.push(note(base, bar, s0 + 1, 90, 0.84));
+      out.push(note(base, bar, s0 + 3, 80, 0.8));
+    }
   }
   return out;
 }
 
-function technoBass(bar: number, root: number): NoteEvent[] {
+function technoBass(bar: number, root: number, complex: boolean): NoteEvent[] {
   const out: NoteEvent[] = [];
   const base = root + 12;
-  [2, 6, 10, 14].forEach((s, i) => out.push(note(base, bar, s, 160, i % 2 === 0 ? 0.88 : 0.78)));
+  const steps = complex ? [2, 3, 6, 10, 11, 14] : [2, 6, 10, 14];
+  steps.forEach((s, i) => out.push(note(base + (complex && s % 4 === 3 ? 12 : 0), bar, s, complex ? 90 : 160, i % 2 === 0 ? 0.88 : 0.74)));
   return out;
 }
 
-function hatsClosed(bar: number, energy: EnergyLevel): NoteEvent[] {
+function hatsClosed(bar: number, energy: EnergyLevel, complex = false): NoteEvent[] {
   const out: NoteEvent[] = [];
   const midi = 42;
-  const dense = energy >= EnergyLevel.HIGH;
   for (let s = 0; s < 16; s++) {
-    if (!dense && s % 2 !== 0) continue;
+    if (!complex && s % 2 !== 0) continue;
+    if (!complex && energy < EnergyLevel.HIGH && s % 4 !== 2) continue;
     const off = s % 4 === 2;
-    out.push(note(midi, bar, s, 50, off ? 0.78 : 0.48 + (s % 4) * 0.04));
+    out.push(note(midi, bar, s, 50, off ? 0.8 : 0.42 + (s % 4) * 0.05));
   }
   return out;
 }
@@ -225,13 +252,16 @@ function padChord(bar: number, root: number, scale: number[], energy: EnergyLeve
   );
 }
 
-function arpPattern(bar: number, root: number, scale: number[], phrase: Phrase): NoteEvent[] {
+function arpPattern(bar: number, root: number, scale: number[], complex: boolean, liftBar = false): NoteEvent[] {
   const out: NoteEvent[] = [];
-  const cycle = [0, 2, 4, 2];
-  for (let s = 0; s < 16; s += 2) {
-    const deg = cycle[(s / 2) % cycle.length];
-    const lift = phrase[s] >= 5 ? 12 : 0;
-    out.push(note(root + 36 + scale[deg % scale.length] + lift, bar, s, 90, 0.62));
+  const simple = [0, 2, 4, 2];
+  const busy = [0, 2, 4, 5, 4, 2, 0, 2];
+  const step = complex ? 1 : 2;
+  const cycle = complex ? busy : simple;
+  for (let s = 0; s < 16; s += step) {
+    const deg = cycle[(s / step) % cycle.length];
+    const oct = (liftBar && s >= 8) || (complex && bar % 4 === 2 && s >= 12) ? 12 : 0;
+    out.push(note(root + 36 + scale[deg % scale.length] + oct, bar, s, complex ? 70 : 140, 0.5 + (s / 32)));
   }
   return out;
 }
@@ -250,6 +280,63 @@ function acidLine(bar: number, root: number, scale: number[], peak: boolean): No
 
 function clap(bar: number): NoteEvent[] {
   return [4, 12].map((s) => note(39, bar, s, 100, 0.7));
+}
+
+/** 4-bar emotional arc: state → echo → lift → resolve */
+function writeStoryLead(
+  dest: NoteEvent[],
+  bar: number,
+  sectionBar: number,
+  mode: SectionPlan['leadMode'] | 'loop-simple' | 'loop-complex',
+  root: number,
+  scale: number[],
+  harmony: boolean
+) {
+  const oct = harmony ? 36 : 36;
+  const chapter = sectionBar % 4;
+  const soft = mode === 'break' || mode === 'hint' || mode === 'loop-simple';
+  const busy = mode === 'peak' || mode === 'loop-complex';
+
+  if (soft && !busy) {
+    if (chapter === 0) {
+      writeHeld(dest, root, scale, harmony ? 2 : 0, bar, 0, 8, oct, 0.62);
+      writeHeld(dest, root, scale, harmony ? 4 : 3, bar, 8, 8, oct, 0.7);
+    } else if (chapter === 1) {
+      writeHeld(dest, root, scale, 2, bar, 0, 6, oct, 0.68);
+      writeHeld(dest, root, scale, 0, bar, 8, 8, oct, 0.6);
+    } else if (chapter === 2) {
+      writeHeld(dest, root, scale, 5, bar, 0, 8, oct, 0.78);
+      writeHeld(dest, root, scale, 3, bar, 8, 8, oct, 0.72);
+    } else {
+      writeHeld(dest, root, scale, 2, bar, 0, 4, oct, 0.7);
+      writeHeld(dest, root, scale, 0, bar, 8, 8, oct, 0.84);
+    }
+    return;
+  }
+
+  if (chapter === 0) {
+    writeHeld(dest, root, scale, 0, bar, 0, 3, oct, 0.72);
+    writeHeld(dest, root, scale, 2, bar, 4, 2, oct, 0.76);
+    writeHeld(dest, root, scale, 3, bar, 6, 2, oct, 0.8);
+    writeHeld(dest, root, scale, 5, bar, 8, 4, oct, 0.86);
+    writeHeld(dest, root, scale, 3, bar, 12, 4, oct, 0.74);
+  } else if (chapter === 1) {
+    writeHeld(dest, root, scale, 0, bar, 0, 2, oct, 0.7);
+    writeHeld(dest, root, scale, 3, bar, 4, 4, oct, 0.78);
+    writeHeld(dest, root, scale, 2, bar, 8, 2, oct, 0.72);
+    writeHeld(dest, root, scale, 0, bar, 12, 4, oct, 0.8);
+  } else if (chapter === 2) {
+    writeHeld(dest, root, scale, 5, bar, 0, 3, oct, 0.88);
+    writeHeld(dest, root, scale, 7, bar, 4, 4, oct, 0.92);
+    writeHeld(dest, root, scale, 5, bar, 8, 2, oct, 0.84);
+    writeHeld(dest, root, scale, 3, bar, 12, 4, oct, 0.78);
+  } else {
+    writeHeld(dest, root, scale, 7, bar, 0, 2, oct, 0.9);
+    writeHeld(dest, root, scale, 5, bar, 3, 2, oct, 0.82);
+    writeHeld(dest, root, scale, 3, bar, 6, 2, oct, 0.76);
+    writeHeld(dest, root, scale, 2, bar, 8, 2, oct, 0.72);
+    writeHeld(dest, root, scale, 0, bar, 12, 4, oct, 0.88);
+  }
 }
 
 export function composeProfessionalTrack(
@@ -306,16 +393,17 @@ export function composeProfessionalTrack(
       const inLastTwo = i >= section.bars - 2;
       const layers = new Set(section.layers);
 
+      const complex = section.energy >= EnergyLevel.HIGH;
       if (layers.has('ch1_kick')) {
-        groove.ch1_kick.push(...kickPattern(bar, section.energy, section.type === SectionType.BUILDUP && inLastFour));
+        groove.ch1_kick.push(...kickPattern(bar, section.energy, section.type === SectionType.BUILDUP && inLastFour, complex));
       }
       if (layers.has('ch2_sub')) {
-        groove.ch2_sub.push(...(isTechno ? technoBass(bar, root) : psyBass(bar, root, 0, i % 4 === 3)));
+        groove.ch2_sub.push(...(isTechno ? technoBass(bar, root, complex) : psyBass(bar, root, 0, complex)));
       }
       if (layers.has('ch3_midBass')) {
-        groove.ch3_midBass.push(...(isTechno ? technoBass(bar, root + 12) : psyBass(bar, root, 1, i % 8 === 7)));
+        groove.ch3_midBass.push(...(isTechno ? technoBass(bar, root + 12, complex) : psyBass(bar, root, 1, complex)));
       }
-      if (layers.has('ch12_hhClosed')) groove.ch12_hhClosed.push(...hatsClosed(bar, section.energy));
+      if (layers.has('ch12_hhClosed')) groove.ch12_hhClosed.push(...hatsClosed(bar, section.energy, complex));
       if (layers.has('ch13_hhOpen') && section.energy >= EnergyLevel.MED) groove.ch13_hhOpen.push(...hatsOpen(bar));
       if (layers.has('ch8_snare')) {
         if (section.type === SectionType.BUILDUP && inLastFour) {
@@ -343,10 +431,10 @@ export function composeProfessionalTrack(
         writePhrase(groove.ch5_leadB, counterPhrase(leadPhrase), bar, root, scale, 36, 180, 0.7);
       }
       if (layers.has('ch6_arpA') && section.energy >= EnergyLevel.HIGH) {
-        groove.ch6_arpA.push(...arpPattern(bar, root, scale, leadPhrase || phrases.A));
+        groove.ch6_arpA.push(...arpPattern(bar, root, scale, complex, section.leadMode === 'peak'));
       }
       if (layers.has('ch7_arpB') && section.leadMode === 'peak') {
-        groove.ch7_arpB.push(...arpPattern(bar, root + 7, scale, phrases.B));
+        groove.ch7_arpB.push(...arpPattern(bar, root, scale, true, true));
       }
       if (layers.has('ch14_acid') && (section.energy >= EnergyLevel.HIGH || section.leadMode === 'peak')) {
         groove.ch14_acid.push(...acidLine(bar, root, scale, section.leadMode === 'peak'));
@@ -370,31 +458,28 @@ export function composeMusicalLoop(
 ): NoteEvent[] {
   const scale = theoryEngine.getScaleIntervals(scaleName);
   const root = theoryEngine.getMidiNote(`${key}1`);
-  const phrases = phrasesForGenre(String(genre));
   const isTechno = String(genre).includes('Techno') || String(genre).includes('Melodic');
+  const complex = complexity === 'COMPLEX';
   const out: NoteEvent[] = [];
   const r = channel.toUpperCase();
 
   for (let bar = 0; bar < 4; bar++) {
-    if (r.includes('KICK')) out.push(...kickPattern(bar, EnergyLevel.PEAK, false));
-    else if (r.includes('SUB')) out.push(...(isTechno ? technoBass(bar, root) : psyBass(bar, root, 0, bar === 3)));
-    else if (r.includes('BASS') || r.includes('MID')) out.push(...(isTechno ? technoBass(bar, root + 12) : psyBass(bar, root, 1, bar === 3)));
-    else if (r.includes('HHCLOSED') || r.includes('CLOSED')) out.push(...hatsClosed(bar, complexity === 'COMPLEX' ? EnergyLevel.HIGH : EnergyLevel.MED));
-    else if (r.includes('HHOPEN') || r.includes('OPEN')) out.push(...hatsOpen(bar));
-    else if (r.includes('SNARE')) out.push(...snareBackbeat(bar));
-    else if (r.includes('CLAP')) out.push(...clap(bar));
-    else if (r.includes('PERC') && r.includes('TRIBAL')) out.push(...tribalPerc(bar));
-    else if (r.includes('PERC')) out.push(...percLoop(bar, bar));
-    else if (r.includes('PAD')) out.push(...padChord(bar, root, scale, EnergyLevel.MED));
-    else if (r.includes('ACID')) out.push(...acidLine(bar, root, scale, complexity === 'COMPLEX'));
-    else if (r.includes('ARP')) out.push(...arpPattern(bar, root, scale, phrases.A));
-    else {
-      const bank = phrasesForGenre(String(genre));
-      const cycle = channel === 'ch5_leadB'
-        ? [counterPhrase(bank.A), counterPhrase(bank.B), bank.C, counterPhrase(bank.A)]
-        : [bank.A, bank.A, bank.B, bank.C];
-      writePhrase(out, cycle[bar], bar, root, scale, 36, complexity === 'SIMPLE' ? 220 : 150, 0.86);
-    }
+    if (r.includes('KICK')) out.push(...kickPattern(bar, EnergyLevel.PEAK, false, complex));
+    else if (r.includes('SUB')) out.push(...(isTechno ? technoBass(bar, root, complex) : psyBass(bar, root, 0, complex)));
+    else if (r.includes('BASS') || r.includes('MID')) out.push(...(isTechno ? technoBass(bar, root + 12, complex) : psyBass(bar, root, 1, complex)));
+    else if (r.includes('HHCLOSED') || r.includes('CLOSED')) out.push(...hatsClosed(bar, complex ? EnergyLevel.HIGH : EnergyLevel.LOW, complex));
+    else if (r.includes('HHOPEN') || r.includes('OPEN')) {
+      if (complex || bar % 2 === 0) out.push(...hatsOpen(bar));
+    } else if (r.includes('SNARE')) {
+      if (complex && bar === 3) out.push(...snareRoll(bar, 0.6));
+      else out.push(...snareBackbeat(bar));
+    } else if (r.includes('CLAP')) out.push(...clap(bar));
+    else if (r.includes('PERC') && r.includes('TRIBAL')) out.push(...(complex ? tribalPerc(bar) : tribalPerc(bar).slice(0, 2)));
+    else if (r.includes('PERC')) out.push(...percLoop(bar, complex ? bar + 3 : bar));
+    else if (r.includes('PAD')) out.push(...padChord(bar, root, scale, complex ? EnergyLevel.HIGH : EnergyLevel.LOW));
+    else if (r.includes('ACID')) out.push(...acidLine(bar, root, scale, complex));
+    else if (r.includes('ARP')) out.push(...arpPattern(bar, root, scale, complex, bar === 2));
+    else writeStoryLead(out, bar, bar, complex ? 'loop-complex' : 'loop-simple', root, scale, channel === 'ch5_leadB');
   }
   return out;
 }
