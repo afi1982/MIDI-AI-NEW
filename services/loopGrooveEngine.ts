@@ -273,105 +273,90 @@ const ACID_BY_STYLE: Record<StyleId, number[][]> = {
 
 type LeadHit = { step: number; deg: number; dur: number; vel: number; oct: number };
 
-function leadHitsForStyle(style: StyleId, bar: number, complex: boolean, variant: number): LeadHit[] {
-  const v = variant % 4;
-  if (style === 'goa') {
-    if (!complex) {
-      const degs = [[0, 1, 3, 0], [0, 3, 5, 1], [5, 3, 1, 0], [3, 5, 7, 3]][v];
-      return [0, 4, 8, 12].map((s, i) => ({ step: s, deg: degs[(i + bar) % 4], dur: 3 * TICKS_16, vel: 0.74, oct: bar >= 2 ? 12 : 0 }));
-    }
-    const run = [
-      [0, 1, 3, 1, 0, 3, 5, 3, 0, 1, 3, 5, 7, 5, 3, 1],
-      [0, 1, 0, 3, 1, 5, 3, 1, 0, 3, 5, 7, 5, 3, 1, 0],
-      [3, 1, 0, 1, 3, 5, 7, 5, 3, 1, 0, 1, 3, 5, 3, 0],
-      [0, 1, 3, 5, 3, 1, 0, 1, 5, 3, 1, 0, 3, 5, 7, 5],
-    ][v];
-    return run.map((deg, s) => ({
-      step: s,
-      deg,
-      dur: 70,
-      vel: 0.62 + (s % 4) * 0.06,
-      oct: (bar === 2 && s >= 8) || bar === 3 ? 12 : 0,
-    }));
-  }
+const LEAD_CONTOURS: number[][] = [
+  [0, 2, 3, 5], [0, 3, 2, 0], [5, 3, 2, 0], [0, 7, 5, 3],
+  [0, 1, 3, 1], [0, 4, 0, 5], [7, 5, 7, 0], [0, 2, 4, 7],
+  [3, 0, 5, 2], [0, 0, 3, 5], [5, 7, 3, 0], [2, 3, 5, 2],
+  [0, 5, 3, 7], [1, 0, 3, 0], [0, 3, 7, 5], [4, 2, 0, 2],
+  [7, 3, 5, 0], [0, 2, 7, 5], [3, 5, 0, 1], [5, 1, 3, 0],
+  [0, 6, 4, 2], [2, 0, 4, 7], [1, 3, 5, 7], [7, 4, 2, 0],
+];
 
-  if (style === 'melodic') {
-    const arcs: [number, number, number][][] = [
-      [[0, 0, 8], [5, 8, 8]],
-      [[3, 0, 6], [0, 8, 8]],
-      [[7, 0, 8], [5, 8, 8]],
-      [[5, 0, 4], [3, 4, 4], [0, 8, 8]],
-    ];
-    const row = arcs[(v + bar) % arcs.length];
-    return row.map(([deg, step, dur]) => ({ step, deg, dur: dur * TICKS_16 - 10, vel: 0.78, oct: 0 }));
-  }
+const LEAD_RHYTHMS: number[][][] = [
+  [[0, 8], [8, 8]],
+  [[0, 4], [4, 4], [8, 8]],
+  [[0, 6], [8, 4], [12, 4]],
+  [[0, 3], [4, 4], [8, 3], [12, 4]],
+  [[0, 2], [3, 3], [8, 4], [12, 4]],
+  [[2, 4], [8, 4], [14, 2]],
+  [[0, 4], [8, 2], [11, 2], [14, 2]],
+  [[0, 8], [10, 2], [13, 3]],
+  [[0, 2], [4, 2], [8, 2], [12, 4]],
+  [[0, 5], [6, 2], [8, 8]],
+  [[4, 4], [8, 4], [12, 4]],
+  [[0, 3], [8, 8]],
+  [[0, 2], [2, 2], [6, 2], [8, 3], [12, 4]],
+  [[0, 4], [6, 2], [10, 2], [12, 4]],
+  [[1, 3], [6, 2], [8, 4], [13, 3]],
+  [[0, 16]],
+];
 
+function mutateDeg(deg: number, bar: number, mode: number): { deg: number; oct: number } {
+  if (bar === 0) return { deg, oct: 0 };
+  if (bar === 1) {
+    if (mode === 0) return { deg, oct: 0 };
+    if (mode === 1) return { deg: Math.max(0, 7 - deg), oct: 0 };
+    return { deg: deg + 2, oct: 0 };
+  }
+  if (bar === 2) {
+    if (mode === 0) return { deg: deg + 2, oct: 0 };
+    if (mode === 1) return { deg, oct: 12 };
+    return { deg: deg + 4, oct: 0 };
+  }
+  if (mode === 0) return { deg: bar === 3 && deg > 4 ? 0 : deg, oct: 0 };
+  if (mode === 1) return { deg: Math.max(0, deg - 2), oct: 0 };
+  return { deg: 0, oct: 0 };
+}
+
+function leadHitsForStyle(style: StyleId, bar: number, complex: boolean, seed: number): LeadHit[] {
+  const s = (seed >>> 0) || 1;
+  const contour = LEAD_CONTOURS[s % LEAD_CONTOURS.length];
+  const rhythmBank = complex ? LEAD_RHYTHMS : LEAD_RHYTHMS.filter((r) => r.length <= 3);
+  let rhythm = rhythmBank[(s >>> 5) % rhythmBank.length];
+  const start = (s >>> 10) % 5;
+  const mode = (s >>> 13) % 3;
+
+  if (style === 'goa' && complex) {
+    const cell = contour.map((d) => d + start);
+    return Array.from({ length: 16 }, (_, s) => {
+      const deg = cell[s % cell.length] + (s % 8 === 7 ? 2 : 0);
+      return { step: s, deg, dur: 70, vel: 0.62 + (s % 4) * 0.06, oct: bar >= 2 && s >= 8 ? 12 : 0 };
+    });
+  }
+  if (style === 'goa' && !complex) {
+    rhythm = [[0, 4], [4, 4], [8, 4], [12, 4]];
+  }
   if (style === 'techno') {
-    const stabs = complex
-      ? [[0, 6], [0, 10], [3, 6, 14], [0, 4, 12]][bar]
-      : [[0], [0], [5], [0]][bar];
-    return stabs.map((step, i) => ({
+    rhythm = complex
+      ? [[0, 3], [6, 3], bar === 3 ? [12, 4] : [14, 2]].filter((x) => x.length)
+      : [[0, 8]];
+  }
+  if (style === 'melodic') {
+    rhythm = complex ? [[0, 8], [8, 8]] : [[0, 16]];
+  }
+
+  return rhythm.map(([step, steps], i) => {
+    const raw = contour[(i + start) % contour.length] + start;
+    const mut = mutateDeg(raw, bar, mode);
+    const dur = Math.max(TICKS_16, steps * TICKS_16 - (complex ? 8 : 12));
+    return {
       step,
-      deg: i === 0 ? (v % 2 === 0 ? 0 : 3) : 5,
-      dur: (complex ? 3 : 6) * TICKS_16,
-      vel: 0.82,
-      oct: 0,
-    }));
-  }
-
-  if (style === 'power') {
-    if (!complex) {
-      return [
-        { step: 0, deg: 0, dur: 3 * TICKS_16, vel: 0.84, oct: 0 },
-        { step: 8, deg: 4, dur: 3 * TICKS_16, vel: 0.8, oct: 0 },
-      ];
-    }
-    const cells = bar === 3 ? [0, 2, 4, 6, 8, 11, 12, 14] : [0, 3, 6, 8, 12];
-    return cells.map((s, i) => ({
-      step: s,
-      deg: [0, 4, 0, 5, 3, 0, 4, 0][(i + v) % 8],
-      dur: 2 * TICKS_16,
-      vel: 0.8 + (i % 3) * 0.05,
-      oct: bar === 2 && i > 2 ? 12 : 0,
-    }));
-  }
-
-  // fullon — soaring 4-bar hook
-  if (!complex) {
-    const hook = [[0, 0, 8], [3, 8, 8], [5, 0, 8], [0, 8, 8]][bar] as [number, number, number];
-    const second: [number, number, number] = bar === 2 ? [7, 8, 8] : [hook[0] === 0 ? 3 : 0, (hook[1] + 8) % 16, 8];
-    return [
-      { step: hook[1] % 16, deg: hook[0], dur: hook[2] * TICKS_16 - 12, vel: 0.78, oct: 0 },
-      { step: second[1], deg: second[0], dur: second[2] * TICKS_16 - 12, vel: 0.82, oct: 0 },
-    ];
-  }
-  const story: LeadHit[][] = [
-    [
-      { step: 0, deg: 0, dur: 3 * TICKS_16, vel: 0.74, oct: 0 },
-      { step: 4, deg: 2, dur: 2 * TICKS_16, vel: 0.78, oct: 0 },
-      { step: 8, deg: 3, dur: 4 * TICKS_16, vel: 0.84, oct: 0 },
-    ],
-    [
-      { step: 0, deg: 3, dur: 4 * TICKS_16, vel: 0.8, oct: 0 },
-      { step: 8, deg: 2, dur: 2 * TICKS_16, vel: 0.74, oct: 0 },
-      { step: 12, deg: 0, dur: 4 * TICKS_16, vel: 0.82, oct: 0 },
-    ],
-    [
-      { step: 0, deg: 5, dur: 3 * TICKS_16, vel: 0.88, oct: 0 },
-      { step: 4, deg: 7, dur: 4 * TICKS_16, vel: 0.92, oct: 12 },
-      { step: 10, deg: 5, dur: 2 * TICKS_16, vel: 0.84, oct: 0 },
-      { step: 12, deg: 3, dur: 4 * TICKS_16, vel: 0.8, oct: 0 },
-    ],
-    [
-      { step: 0, deg: 7, dur: 2 * TICKS_16, vel: 0.9, oct: 0 },
-      { step: 3, deg: 5, dur: 2 * TICKS_16, vel: 0.84, oct: 0 },
-      { step: 6, deg: 3, dur: 2 * TICKS_16, vel: 0.78, oct: 0 },
-      { step: 8, deg: 2, dur: 2 * TICKS_16, vel: 0.74, oct: 0 },
-      { step: 12, deg: 0, dur: 4 * TICKS_16, vel: 0.9, oct: 0 },
-    ],
-  ];
-  const lift = v === 1 ? 1 : v === 2 ? 2 : 0;
-  return story[bar].map((h) => ({ ...h, deg: h.deg + lift }));
+      deg: mut.deg,
+      dur,
+      vel: 0.72 + i * 0.04,
+      oct: mut.oct + (style === 'power' && bar === 2 ? 12 : 0),
+    };
+  });
 }
 
 function writeDegrees(
@@ -489,21 +474,18 @@ export function composeSeededLoop(
 
     if (ch.includes('ACID')) {
       const bank = ACID_BY_STYLE[style];
-      const shape = bank[kit.acidStyle % bank.length].slice();
-      if (!complex) {
-        shape.forEach((d, i) => {
-          if (style === 'goa' && i % 2 === 1) shape[i] = -1;
-          else if (style !== 'goa' && style !== 'techno' && i % 4 === 3) shape[i] = -1;
-        });
-      } else if (style === 'goa' && bar === 2) {
-        shape.forEach((d, i) => { if (d >= 0) shape[i] = Math.min(8, d + 2); });
-      } else if (style === 'fullon' && bar === 3) {
-        shape[14] = 0;
-        shape[15] = 3;
-      } else if (style === 'power' && bar === 3) {
-        for (let s = 12; s < 16; s++) shape[s] = s % 2 === 0 ? 0 : 4;
+      const rngA = makeRng((seed >>> 0) ^ 0xa31c ^ (bar + 1) * 97);
+      const shape = bank[Math.floor(rngA() * bank.length)].slice();
+      const rot = irand(rngA, 0, 7);
+      for (let i = 0; i < 16; i++) {
+        const src = shape[(i + rot) % 16];
+        if (src < 0) continue;
+        shape[i] = (src + irand(rngA, 0, 2)) % 8;
+        if (!complex && rngA() < 0.35) shape[i] = -1;
+        if (complex && rngA() < 0.12) shape[i] = -1;
       }
-      const oct = style === 'goa' ? (bar >= 2 ? 24 : 12) : style === 'power' ? 0 : style === 'techno' ? 12 : 12;
+      if (bar === 3) shape[15] = 0;
+      const oct = style === 'goa' ? (bar >= 2 ? 24 : 12) : style === 'power' ? 0 : 12;
       const dur = style === 'goa' ? (complex ? 42 : 58) : style === 'melodic' ? 140 : style === 'techno' ? 40 : complex ? 48 : 72;
       writeDegrees(out, shape, bar, root, scale, oct, dur, style === 'power' ? 0.86 : 0.74);
       continue;
@@ -562,7 +544,7 @@ export function composeSeededLoop(
       continue;
     }
 
-    const hits = leadHitsForStyle(style, bar, complex, kit.leadStyle);
+    const hits = leadHitsForStyle(style, bar, complex, seed);
     hits.forEach((h) => {
       const oct = Math.floor(h.deg / scale.length);
       const d = ((h.deg % scale.length) + scale.length) % scale.length;

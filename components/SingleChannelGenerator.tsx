@@ -287,7 +287,7 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                         </button>
                     </div>
                     <p className="text-[11px] text-gray-400 text-center" dir="rtl">
-                        הסגנון מחליף את אופי הליד והאסיד (לא רק את ה-BPM). New loop מחליף גרוב. ליד ואסיד נשמעים שונה.
+                        New loop בונה מנגינה חדשה (קונטור + קצב + פיתוח). לא אותן שתי אופציות.
                     </p>
                     <button
                         onClick={() => {

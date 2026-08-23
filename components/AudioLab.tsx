@@ -101,7 +101,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
     const [manualBpm, setManualBpm] = useState<number>(145);
-    const [autoBpm, setAutoBpm] = useState(true);
+    const [autoBpm, setAutoBpm] = useState(false);
     const [showSettings, setShowSettings] = useState(true);
     const [pickError, setPickError] = useState<string | null>(null);
     const [genre, setGenre] = useState<MusicGenre>(MusicGenre.PSYTRANCE_FULLON);
@@ -195,34 +195,61 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                 </div>
             </header>
 
-            {showSettings && !activeJobId && (
-                <div className="bg-[#0A0A0B] border-b border-white/5 p-3 md:px-8 animate-in slide-in-from-top-2">
-                    <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-2">
-                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
-                            <span className="text-[8px] font-black text-gray-500 uppercase">Style</span>
-                            <select value={genre} onChange={(e) => setGenre(e.target.value as MusicGenre)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
-                                {Object.values(MusicGenre).map((g) => <option key={g} value={g} className="bg-black">{g}</option>)}
-                            </select>
-                        </label>
-                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
-                            <span className="text-[8px] font-black text-gray-500 uppercase">BPM</span>
-                            <div className="flex items-center gap-2 mt-1">
-                                <button type="button" onClick={() => setAutoBpm(!autoBpm)} className={`text-[9px] font-black px-2 py-1 rounded ${autoBpm ? 'bg-blue-600' : 'bg-white/10'}`}>AUTO</button>
-                                <input type="number" value={manualBpm} disabled={autoBpm} onChange={(e) => { setAutoBpm(false); setManualBpm(parseInt(e.target.value) || 145); }} className="bg-transparent outline-none text-white font-bold w-16 text-sm disabled:opacity-40" />
+            {!activeJobId && (
+                <div className="bg-[#0A0A0B] border-b border-white/5 p-3 md:px-8">
+                    <div className="max-w-4xl mx-auto space-y-3">
+                        <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-3">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-[10px] font-black uppercase text-blue-300" dir="rtl">קצב לפני הניתוח — כך השיר יתנגן</span>
+                                <button type="button" onClick={() => setAutoBpm(!autoBpm)} className={`text-[9px] font-black px-2 py-1 rounded ${autoBpm ? 'bg-white/10 text-gray-400' : 'bg-blue-600 text-white'}`}>
+                                    {autoBpm ? 'AUTO' : 'ידני'}
+                                </button>
                             </div>
-                        </label>
-                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
-                            <span className="text-[8px] font-black text-gray-500 uppercase">Key</span>
-                            <select value={keyName} onChange={(e) => setKeyName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
-                                {Object.values(MusicalKey).map((k) => <option key={k} value={k} className="bg-black">{k}</option>)}
-                            </select>
-                        </label>
-                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
-                            <span className="text-[8px] font-black text-gray-500 uppercase">Scale</span>
-                            <select value={scaleName} onChange={(e) => setScaleName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
-                                {Object.values(ScaleType).map((s) => <option key={s} value={s} className="bg-black">{s}</option>)}
-                            </select>
-                        </label>
+                            <div className="flex items-center gap-3">
+                                <input
+                                    type="range"
+                                    min={118}
+                                    max={155}
+                                    value={manualBpm}
+                                    onChange={(e) => { setAutoBpm(false); setManualBpm(parseInt(e.target.value, 10) || 145); }}
+                                    className="flex-1 accent-blue-500"
+                                />
+                                <input
+                                    type="number"
+                                    min={80}
+                                    max={180}
+                                    value={manualBpm}
+                                    onChange={(e) => { setAutoBpm(false); setManualBpm(parseInt(e.target.value, 10) || 145); }}
+                                    className="w-16 bg-black border border-white/20 rounded-lg text-center text-lg font-black text-white outline-none"
+                                />
+                                <span className="text-xs font-black text-white">BPM</span>
+                            </div>
+                            <p className="text-[11px] text-gray-300 mt-2" dir="rtl">
+                                בחרו קצב ואז את הקובץ. הניתוח ייצא ב־{manualBpm} BPM{autoBpm ? ' (או אוטומטי מהשיר)' : ''}.
+                            </p>
+                        </div>
+                        {showSettings && (
+                            <div className="grid grid-cols-3 gap-2">
+                                <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                                    <span className="text-[8px] font-black text-gray-500 uppercase">Style</span>
+                                    <select value={genre} onChange={(e) => setGenre(e.target.value as MusicGenre)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                        {Object.values(MusicGenre).map((g) => <option key={g} value={g} className="bg-black">{g}</option>)}
+                                    </select>
+                                </label>
+                                <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                                    <span className="text-[8px] font-black text-gray-500 uppercase">Key</span>
+                                    <select value={keyName} onChange={(e) => setKeyName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                        {Object.values(MusicalKey).map((k) => <option key={k} value={k} className="bg-black">{k}</option>)}
+                                    </select>
+                                </label>
+                                <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                                    <span className="text-[8px] font-black text-gray-500 uppercase">Scale</span>
+                                    <select value={scaleName} onChange={(e) => setScaleName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                        {Object.values(ScaleType).map((s) => <option key={s} value={s} className="bg-black">{s}</option>)}
+                                    </select>
+                                </label>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
