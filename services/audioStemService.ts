@@ -342,10 +342,11 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   const bpm = options.bpm && options.bpm > 40 ? options.bpm : analysis.bpm;
   const key = options.key || analysis.key;
   const scale = options.scale || analysis.scale;
+  const minutes = Math.max(2, Math.min(4, analysis.durationSec / 60 || 2));
   const groove = composeProfessionalTrack(
     { bpm, key, scale, genre: options.genre, trackName: options.trackName || `From Audio · ${key} ${scale}` },
-    1,
-    ['ch1_kick', 'ch2_sub', 'ch3_midBass', 'ch4_leadA', 'ch8_snare', 'ch12_hhClosed', 'ch15_pad']
+    minutes,
+    [...ELITE_16_CHANNELS]
   );
 
   const ratio = bpm / Math.max(80, analysis.bpm);
@@ -361,31 +362,81 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   });
 
   const hero = extracted.length ? extracted : groove.ch4_leadA;
-  const drops = (groove.structureMap || []).filter((s) => s.type === 'DROP' || s.type === 'MELODY_INTRO' || s.type === 'BREAKDOWN');
+  const totalBars = Math.min(64, groove.totalBars || 64);
   const leadOut: NoteEvent[] = [];
-  if (drops.length && hero.length) {
-    drops.forEach((section) => {
-      const lift = section.type === 'DROP' && section.energy >= 4 ? 12 : 0;
-      leadOut.push(...tileLead(hero, section.startBar, section.durationBars, lift > 0 ? 0 : 0));
-      if (section.type === 'DROP') {
-        const climax = tileLead(hero, section.startBar + Math.floor(section.durationBars / 2), Math.min(8, section.durationBars), 12);
-        leadOut.push(...climax);
+  if (hero.length) {
+    (groove.structureMap || []).forEach((section) => {
+      if (section.startBar >= totalBars) return;
+      const bars = Math.min(section.durationBars, totalBars - section.startBar);
+      const silent = section.type === 'INTRO' && section.startBar === 0;
+      if (silent) {
+        leadOut.push(...tileLead(hero, section.startBar + Math.max(4, bars - 8), Math.min(8, bars), 0));
+      } else {
+        leadOut.push(...tileLead(hero, section.startBar, bars, section.type === 'DROP' ? 0 : 0));
       }
     });
-    groove.ch4_leadA = leadOut.sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
-  } else if (hero.length) {
-    groove.ch4_leadA = tileLead(hero, 16, Math.max(16, (groove.totalBars || 32) - 24));
+    groove.ch4_leadA = leadOut
+      .filter((n) => (n.startTick || 0) < totalBars * 1920)
+      .map((n) => ({ ...n, velocity: Math.min(1, (n.velocity || 0.8) + 0.12) }))
+      .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
   }
 
-  groove.ch5_leadB = groove.ch4_leadA.filter((_, i) => i % 2 === 1).map((n) => {
+  groove.ch5_leadB = groove.ch4_leadA.filter((_, i) => i % 3 === 0).map((n) => {
     const m = theoryEngine.snapMidiToScale(theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) + 3, key, scale);
-    return ev(m, (n.startTick || 0) + 60, Math.max(80, (n.durationTicks || 160) - 30), 0.58);
+    return ev(m, (n.startTick || 0) + 120, Math.max(80, (n.durationTicks || 160) - 40), 0.42);
   });
 
+  const intervals = theoryEngine.getScaleIntervals(scale);
+  const root = theoryEngine.getMidiNote(`${key}3`);
+  const motif = extracted.slice(0, 16).map((n) => {
+    const pc = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) % 12;
+    let best = 0;
+    let dist = 12;
+    intervals.forEach((iv, i) => {
+      const d = Math.min((pc - ((root + iv) % 12) + 12) % 12, (((root + iv) % 12) - pc + 12) % 12);
+      if (d < dist) { dist = d; best = i; }
+    });
+    return best;
+  });
+  if (!motif.length) motif.push(0, 2, 3, 5);
+
+  const fillBars = (write: (bar: number) => NoteEvent[]) => {
+    const out: NoteEvent[] = [];
+    for (let bar = 0; bar < totalBars; bar++) out.push(...write(bar));
+    return out;
+  };
+
+  groove.ch6_arpA = fillBars((bar) => {
+    if (bar % 16 < 4) return [];
+    return [0, 4, 8, 12].map((s, i) => ev(root + 12 + intervals[motif[(i + bar) % motif.length] % intervals.length], bar * 1920 + s * 120, 100, 0.45));
+  });
+  groove.ch7_arpB = fillBars((bar) => {
+    if (bar % 16 < 8) return [];
+    return [2, 6, 10, 14].map((s, i) => ev(root + 24 + intervals[motif[(i + 2) % motif.length] % intervals.length], bar * 1920 + s * 120, 80, 0.38));
+  });
+  groove.ch14_acid = fillBars((bar) => {
+    if (bar % 8 === 0) return [];
+    return [1, 3, 5, 7, 9, 11, 13, 15].map((s, i) => ev(root - 12 + intervals[motif[i % motif.length] % intervals.length], bar * 1920 + s * 120, 50, 0.55));
+  });
+  groove.ch16_synth = fillBars((bar) => {
+    if (bar % 16 !== 15 && bar % 16 !== 7) return [];
+    return [ev(root + 36 + intervals[0], bar * 1920, 480, 0.4)];
+  });
+  groove.ch11_percTribal = fillBars((bar) => {
+    if (bar < 8) return [];
+    return [1, 7, 11].map((s) => ev(62, bar * 1920 + s * 120, 50, 0.4));
+  });
+  groove.ch10_percLoop = fillBars((bar) => {
+    if (bar % 4 === 3) return [3, 10, 14].map((s) => ev(60, bar * 1920 + s * 120, 40, 0.35));
+    return [];
+  });
+  groove.ch13_hhOpen = fillBars((bar) => (bar % 2 === 1 ? [ev(46, bar * 1920 + 14 * 120, 80, 0.45)] : []));
+  groove.ch9_clap = fillBars((bar) => (bar >= 8 ? [ev(39, bar * 1920 + 4 * 120, 80, 0.6), ev(39, bar * 1920 + 12 * 120, 80, 0.55)] : []));
+
   const mask = analysis.kickMask?.length === 16 ? analysis.kickMask : [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
-  const totalBars = groove.totalBars || 64;
+  const kickBars = totalBars;
   const styledKick: NoteEvent[] = [];
-  for (let bar = 0; bar < totalBars; bar++) {
+  for (let bar = 0; bar < kickBars; bar++) {
     mask.forEach((on, step) => {
       if (!on) return;
       styledKick.push(ev(36, bar * 1920 + step * 120, step % 4 === 0 ? 140 : 50, step % 4 === 0 ? 1 : 0.45));

@@ -187,8 +187,42 @@ export class AudioService {
     this.stopNodes();
   }
 
-  public getSecondsSafe() {
-    return this.getSeconds();
+  public async playLoop(notes: NoteEvent[], bpm: number, channel: string) {
+    const ok = await this.unlock();
+    if (!ok || !this.ctx) throw new Error('האודיו נעול. לחצו Play שוב.');
+    this.stopNodes();
+    const ctx = this.ctx;
+    const tempo = Math.max(80, Math.min(180, bpm || 145));
+    const now = ctx.currentTime + 0.05;
+    const tickSec = (ticks: number) => (ticks / 480) * (60 / tempo);
+    const loopSec = 4 * 4 * (60 / tempo);
+    const reps = 16;
+    let scheduled = 0;
+
+    const kind = channel.includes('kick') ? 'kick'
+      : (channel.includes('sub') || channel.includes('bass')) ? 'bass'
+      : (channel.includes('hh') || channel.includes('snare') || channel.includes('clap') || channel.includes('perc')) ? 'drum'
+      : 'lead';
+
+    for (let r = 0; r < reps; r++) {
+      const off = r * loopSec;
+      notes.forEach((n) => {
+        const start = now + off + tickSec(n.startTick || 0);
+        const dur = Math.max(0.07, tickSec(n.durationTicks || 160));
+        const midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note || 'C4');
+        if (kind === 'kick') this.kick(ctx, start, n.velocity || 0.95);
+        else if (kind === 'drum') this.noise(ctx, start, channel.includes('hh') ? 0.04 : 0.12, 0.16);
+        else if (kind === 'bass') this.tone(ctx, start, midiHz(midi), dur, 0.24, 'sawtooth');
+        else this.tone(ctx, start, midiHz(midi), dur, 0.22, 'triangle');
+        scheduled++;
+      });
+    }
+
+    if (!scheduled) throw new Error('אין תווים בלולאה.');
+    this.startedAt = now;
+    this.playing = true;
+    this.playTimer = window.setTimeout(() => { this.playing = false; }, reps * loopSec * 1000 + 200);
+    return scheduled;
   }
 }
 
