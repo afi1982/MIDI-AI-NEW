@@ -4,11 +4,12 @@ import { useDropzone } from 'react-dropzone';
 import { jobQueueService, Job } from '../services/jobQueueService';
 import { downloadFullArrangementMidi } from '../services/midiService';
 import { AudioWaveform, ArrowLeft, Loader2, Play, Pause, Download, Microscope, ShieldCheck, Zap, RefreshCw, Star, Layers, Settings2, Clock } from 'lucide-react';
-import { GrooveObject, NoteEvent } from '../types';
+import { GrooveObject, NoteEvent, MusicGenre, MusicalKey, ScaleType } from '../types';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
 import { theoryEngine } from '../services/theoryEngine';
 import { SourceExportButton } from './SourceExportButton';
-import { describeAudioPickError, DESKTOP_AUDIO_ACCEPT, isPhoneFilePicker } from '../services/audioFilePicker';
+import { describeAudioPickError, openNativeFilePicker, ALL_FILES_ACCEPT, SONG_ACCEPT } from '../services/audioFilePicker';
+import { QualityReportCard } from './QualityReportCard';
 
 interface AudioLabProps {
     onClose: () => void;
@@ -86,7 +87,7 @@ const LabPianoRoll: React.FC<{ groove: GrooveObject, progress: number }> = ({ gr
                 <div className="flex items-center gap-2"><div className="w-2 h-2 bg-blue-500 rounded-full" /><span className="text-[10px] font-bold">Scale Sync</span></div>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 bg-amber-500 rounded-full" /><span className="text-[10px] font-bold">Acoustic Signal</span></div>
                 <div className="h-3 w-[1px] bg-white/10 mx-1" />
-                <div className="flex items-center gap-2 text-sky-400"><Star size={10} /><span className="text-[10px] font-black uppercase">1:1 Mono Lead Mode</span></div>
+                <div className="flex items-center gap-2 text-sky-400"><Star size={10} /><span className="text-[10px] font-black uppercase">16-channel trance map</span></div>
             </div>
         </div>
     );
@@ -98,11 +99,14 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [manualBpm, setManualBpm] = useState<number>(0);
-    const [showSettings, setShowSettings] = useState(false);
+    const [manualBpm, setManualBpm] = useState<number>(145);
+    const [autoBpm, setAutoBpm] = useState(true);
+    const [showSettings, setShowSettings] = useState(true);
     const [pickError, setPickError] = useState<string | null>(null);
+    const [genre, setGenre] = useState<MusicGenre>(MusicGenre.PSYTRANCE_FULLON);
+    const [keyName, setKeyName] = useState<string>(MusicalKey.F_SHARP);
+    const [scaleName, setScaleName] = useState<string>(ScaleType.PHRYGIAN);
     const audioRef = useRef<HTMLAudioElement | null>(null);
-    const nativeInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         // If no active job ID, look for the most recent AUDIO_REGRESSION job that isn't completed or failed
@@ -127,9 +131,9 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
         }
         setPickError(null);
         setAudioUrl(URL.createObjectURL(file));
-        const overrideBpm = manualBpm > 20 ? manualBpm : undefined;
-        setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm));
-    }, [manualBpm]);
+        const overrideBpm = !autoBpm && manualBpm > 20 ? manualBpm : undefined;
+        setActiveJobId(jobQueueService.addAudioJob(file, overrideBpm, { genre, key: keyName, scale: scaleName }));
+    }, [autoBpm, manualBpm, genre, keyName, scaleName]);
 
     const onDrop = useCallback((files: File[]) => {
         if (files.length === 0) return;
@@ -146,15 +150,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
         noKeyboard: true,
     } as any);
 
-    const openPhonePicker = () => {
-        nativeInputRef.current?.click();
-    };
-
-    const onNativePick = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (file) startAudioJob(file);
-    };
+    const pickAllFiles = () => openNativeFilePicker(ALL_FILES_ACCEPT, startAudioJob);
+    const pickSongsOnly = () => openNativeFilePicker(SONG_ACCEPT, startAudioJob);
 
     useEffect(() => {
         if (!isPlaying) return;
@@ -193,24 +190,33 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
             </header>
 
             {showSettings && !activeJobId && (
-                <div className="bg-[#0A0A0B] border-b border-white/5 p-4 md:px-8 animate-in slide-in-from-top-2">
-                    <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center gap-6">
-                        <div className="flex items-center gap-4 bg-black/40 p-4 rounded-2xl border border-white/5 w-full md:w-auto">
-                            <Clock size={16} className="text-blue-400" />
-                            <div className="flex flex-col">
-                                <label className="text-[8px] font-black text-gray-500 uppercase">Pre-transcription BPM Override</label>
-                                <input 
-                                    type="number" 
-                                    placeholder="Auto" 
-                                    value={manualBpm || ''} 
-                                    onChange={(e) => setManualBpm(parseInt(e.target.value))}
-                                    className="bg-transparent border-none outline-none text-white font-bold w-24 text-lg"
-                                />
+                <div className="bg-[#0A0A0B] border-b border-white/5 p-3 md:px-8 animate-in slide-in-from-top-2">
+                    <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                            <span className="text-[8px] font-black text-gray-500 uppercase">Style</span>
+                            <select value={genre} onChange={(e) => setGenre(e.target.value as MusicGenre)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                {Object.values(MusicGenre).map((g) => <option key={g} value={g} className="bg-black">{g}</option>)}
+                            </select>
+                        </label>
+                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                            <span className="text-[8px] font-black text-gray-500 uppercase">BPM</span>
+                            <div className="flex items-center gap-2 mt-1">
+                                <button type="button" onClick={() => setAutoBpm(!autoBpm)} className={`text-[9px] font-black px-2 py-1 rounded ${autoBpm ? 'bg-blue-600' : 'bg-white/10'}`}>AUTO</button>
+                                <input type="number" value={manualBpm} disabled={autoBpm} onChange={(e) => { setAutoBpm(false); setManualBpm(parseInt(e.target.value) || 145); }} className="bg-transparent outline-none text-white font-bold w-16 text-sm disabled:opacity-40" />
                             </div>
-                        </div>
-                        <p className="text-[10px] text-gray-500 max-w-sm leading-relaxed">
-                            If the AI misidentifies the tempo, enter the correct BPM here. This forces the 120-tick grid alignment protocol for better DAW compatibility.
-                        </p>
+                        </label>
+                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                            <span className="text-[8px] font-black text-gray-500 uppercase">Key</span>
+                            <select value={keyName} onChange={(e) => setKeyName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                {Object.values(MusicalKey).map((k) => <option key={k} value={k} className="bg-black">{k}</option>)}
+                            </select>
+                        </label>
+                        <label className="bg-black/40 p-3 rounded-xl border border-white/5">
+                            <span className="text-[8px] font-black text-gray-500 uppercase">Scale</span>
+                            <select value={scaleName} onChange={(e) => setScaleName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                {Object.values(ScaleType).map((s) => <option key={s} value={s} className="bg-black">{s}</option>)}
+                            </select>
+                        </label>
                     </div>
                 </div>
             )}
@@ -218,52 +224,46 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
             <div className="flex-1 p-4 md:p-8 overflow-y-auto custom-scrollbar">
                 {!activeJob ? (
                     <div className="max-w-4xl mx-auto space-y-8">
-                        <div {...getRootProps()} className={`w-full min-h-[220px] md:h-96 border-2 border-dashed rounded-3xl md:rounded-[3rem] flex flex-col items-center justify-center bg-[#0A0A0C] px-4 py-8 ${isDragActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/10'}`}>
+                        <div {...getRootProps()} className={`w-full min-h-[220px] border-2 border-dashed rounded-3xl flex flex-col items-center justify-center bg-[#0A0A0C] px-4 py-8 ${isDragActive ? 'border-blue-500 bg-blue-500/5' : 'border-white/10'}`}>
                             <input {...getInputProps()} />
-                            <input
-                                ref={nativeInputRef}
-                                type="file"
-                                className="hidden"
-                                accept={isPhoneFilePicker() ? undefined : DESKTOP_AUDIO_ACCEPT}
-                                onChange={onNativePick}
-                            />
-                            <div className="w-16 h-16 md:w-24 md:h-24 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 border border-blue-500/20">
+                            <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 border border-blue-500/20">
                                 <AudioWaveform size={32} className={isDragActive ? 'text-blue-400 animate-pulse' : 'text-gray-500'} />
                             </div>
-                            <h3 className="text-lg md:text-2xl font-black uppercase tracking-widest text-white italic text-center">Audio to MIDI</h3>
-                            <p className="text-sm text-gray-300 font-medium mt-3 text-center max-w-sm" dir="rtl">
-                                בחרו קובץ שמע מהטלפון: MP3, WAV, M4A או AAC
+                            <h3 className="text-lg font-black uppercase tracking-widest text-white italic text-center">Audio to MIDI</h3>
+                            <p className="text-sm text-gray-200 font-medium mt-3 text-center max-w-sm" dir="rtl">
+                                בחרו שיר (MP3 / WAV / M4A). לא קובץ MIDI.
                             </p>
-                            <p className="text-[11px] text-gray-500 mt-1 text-center max-w-xs" dir="rtl">
-                                לא קובץ MIDI. אם פותחים תיקייה יופיעו כל הקבצים — בחרו שיר, לא .mid
+                            <p className="text-[11px] text-amber-200/90 mt-2 text-center max-w-xs leading-relaxed" dir="rtl">
+                                בסמסונג: אם מסומן «אודיו» תראו רק .mid. לחצו «מסמך» למעלה, או השתמשו בכפתור «כל הקבצים».
                             </p>
-                            <button
-                                type="button"
-                                onClick={openPhonePicker}
-                                className="mt-5 px-6 py-3 rounded-xl bg-blue-600 text-white text-sm font-black uppercase active:scale-95"
-                            >
-                                בחרו קובץ שמע
-                            </button>
+                            <div className="mt-5 flex flex-col sm:flex-row gap-2 w-full max-w-sm">
+                                <button type="button" onClick={pickAllFiles} className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white text-xs font-black uppercase active:scale-95">
+                                    כל הקבצים בתיקייה
+                                </button>
+                                <button type="button" onClick={pickSongsOnly} className="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white text-xs font-black uppercase active:scale-95">
+                                    רק MP3 / M4A / WAV
+                                </button>
+                            </div>
                             {pickError && (
                                 <p className="mt-4 text-sm text-amber-400 text-center max-w-sm font-bold" dir="rtl">{pickError}</p>
                             )}
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="bg-white/5 border border-white/5 p-6 rounded-3xl group hover:border-blue-500/30 transition-all">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Layers className="text-blue-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">1:1 Lead Extraction</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">Focuses entirely on a single prominent melody. Ignores chords, drums, and bass for pure monophonic accuracy.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">כל 16 הערוצים</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">Kick, Bass, Hats, Acid, Pad ו-FX נבנים יחד. המלודיה הראשית מובילה.</p>
                             </div>
-                            <div className="bg-white/5 border border-white/5 p-6 rounded-3xl group hover:border-amber-500/30 transition-all">
+                            <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Zap className="text-amber-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">RMS Mapping</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">Direct translation of acoustic amplitude to MIDI Velocity (0-127). No static levels.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">טראנס לפי הסגנון</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">השיר מנותח, ואז מסודר לפי הסגנון וה-BPM שבחרתם באתר.</p>
                             </div>
-                            <div className="bg-white/5 border border-white/5 p-6 rounded-3xl group hover:border-green-500/30 transition-all">
+                            <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <ShieldCheck className="text-green-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">Micro-tonality</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">Captures frequency fluctuations as Pitch Bend data. Preserves the ethnic soul of the instrument.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">מלודיה מורכבת</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">הקו הראשי מתפתח ב-drop עם וריאציות, לא קו יחיד שטוח.</p>
                             </div>
                         </div>
                     </div>
@@ -287,24 +287,35 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                              <div className="h-full bg-gradient-to-r from-blue-600 to-sky-400 transition-all duration-700" style={{ width: `${activeJob.progress}%` }}></div>
                         </div>
                     </div>
+                ) : activeJob.status === 'FAILED' ? (
+                    <div className="max-w-lg mx-auto text-center space-y-4 py-12">
+                        <p className="text-amber-300 font-bold" dir="rtl">{activeJob.error || 'ההמרה נכשלה'}</p>
+                        <button type="button" onClick={() => { setActiveJob(null); setActiveJobId(null); }} className="px-6 py-3 bg-white text-black rounded-xl font-black uppercase text-xs">נסה שוב</button>
+                    </div>
                 ) : activeJob.result && (
-                    <div className="flex flex-col gap-6 h-full animate-in zoom-in-95 duration-500">
-                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 bg-[#0A0A0C] p-4 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-white/10 shadow-2xl">
-                            <div className="flex gap-6 md:gap-12">
-                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Detected Tempo</div><div className="text-2xl md:text-3xl font-black font-mono">{activeJob.result.bpm} <span className="text-sm opacity-30">BPM</span></div></div>
-                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Transcription</div><div className="text-2xl md:text-3xl font-black font-mono text-blue-400">1:1 <span className="text-base md:text-xl opacity-60 italic">MONO</span></div></div>
+                    <div className="flex flex-col gap-4 h-full animate-in zoom-in-95 duration-500">
+                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 bg-[#0A0A0C] p-4 md:p-6 rounded-3xl border border-white/10">
+                            <div className="flex gap-6">
+                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Tempo</div><div className="text-2xl font-black font-mono">{activeJob.result.bpm} <span className="text-sm opacity-30">BPM</span></div></div>
+                                <div><div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Key</div><div className="text-2xl font-black font-mono text-blue-400">{activeJob.result.key} <span className="text-sm opacity-60">{activeJob.result.scale}</span></div></div>
                             </div>
-                            <div className="flex items-center gap-6">
-                                <div className="text-right hidden sm:block">
-                                    <div className="text-[10px] font-black text-green-500 uppercase">Micro-tonal Bends Included</div>
-                                    <div className="text-[9px] text-gray-500 font-mono">RMS Energy Mapping: Active</div>
-                                </div>
-                                <button onClick={() => isPlaying ? audioRef.current?.pause() : audioRef.current?.play()} className={`w-14 h-14 md:w-20 md:h-20 self-center rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 ${isPlaying ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
-                                    {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
-                                </button>
-                            </div>
+                            <button onClick={() => isPlaying ? audioRef.current?.pause() : audioRef.current?.play()} className={`w-14 h-14 self-center rounded-full flex items-center justify-center ${isPlaying ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
+                                {isPlaying ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" className="ml-1" />}
+                            </button>
                         </div>
-                        <div className="flex-1 min-h-[180px] md:min-h-[400px] relative rounded-2xl md:rounded-[3rem] overflow-hidden shadow-2xl border border-white/10">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {ELITE_16_CHANNELS.map((ch) => {
+                                const n = ((activeJob.result as any)[ch] || []).length;
+                                return (
+                                    <div key={ch} className={`rounded-xl border px-3 py-2 ${n ? 'border-blue-500/30 bg-blue-500/10' : 'border-white/5 bg-white/5'}`}>
+                                        <div className="text-[9px] font-black uppercase text-gray-400">{ch.replace(/ch\d+_/, '')}</div>
+                                        <div className="text-sm font-black">{n} notes</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {activeJob.quality && <QualityReportCard report={activeJob.quality} compact />}
+                        <div className="flex-1 min-h-[180px] md:min-h-[320px] relative rounded-2xl overflow-hidden border border-white/10">
                             <LabPianoRoll groove={activeJob.result} progress={progress} />
                         </div>
                     </div>

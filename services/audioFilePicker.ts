@@ -54,8 +54,27 @@ export function describeAudioPickError(file: File): string | null {
   if (isMidiFile(file)) {
     return 'בחרתם קובץ MIDI. בכלי Audio to MIDI צריך קובץ שמע: MP3, WAV, M4A או AAC.';
   }
-  if (!isAudioFile(file)) {
-    return `הקובץ "${file.name}" אינו קובץ שמע. בחרו MP3, WAV, M4A, AAC, OGG או FLAC.`;
-  }
   return null;
+}
+
+export const SONG_ACCEPT = '.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus,.mp4,.3gp,.webm';
+export const ALL_FILES_ACCEPT = '*/*';
+
+export function openNativeFilePicker(accept: string, onFile: (file: File) => void) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = accept;
+  input.multiple = false;
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  const cleanup = () => {
+    input.remove();
+  };
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    cleanup();
+    if (file) onFile(file);
+  });
+  document.body.appendChild(input);
+  input.click();
 }
