@@ -42,8 +42,17 @@ function scoreFrom(checks: QualityCheck[]) {
   return Math.round((pts / max) * 100);
 }
 
-function healGroove(groove: GrooveObject): string[] {
+function healGroove(groove: GrooveObject, tool: QualityTool = 'TRACK'): string[] {
   const healed: string[] = [];
+  if (tool === 'AUDIO_TO_MIDI') {
+    healed.push('Kept transcribed melody pitches from the source audio');
+    const kick = groove.ch1_kick || [];
+    kick.forEach((n) => {
+      const m = midiOf(n);
+      if (m < 34 || m > 38) n.note = 'C2';
+    });
+    return healed;
+  }
   optimizationService.applyCommand(groove, { operation: 'SYSTEM_SYNC', params: { root: groove.key, mode: groove.scale } });
   healed.push('Quantized pitched notes to key/scale');
 
@@ -119,7 +128,12 @@ export function inspectAndHealGroove(groove: GrooveObject, tool: QualityTool = '
     });
   });
   const scalePct = melodicNotes ? 1 - outOfScale / melodicNotes : 1;
-  checks.push(check('scale', 'In-scale melody', scalePct >= 0.92, `${Math.round(scalePct * 100)}% in ${key} ${scale}`, 'fail'));
+  if (tool === 'AUDIO_TO_MIDI') {
+    checks.push(check('lead', 'Melody transcribed', counts.ch4_leadA >= 8, counts.ch4_leadA ? `${counts.ch4_leadA} lead notes from source` : 'No melody found', 'fail'));
+    checks.push(check('scale', 'Mostly in key', scalePct >= 0.55, `${Math.round(scalePct * 100)}% in ${key} ${scale}`, 'warn'));
+  } else {
+    checks.push(check('scale', 'In-scale melody', scalePct >= 0.92, `${Math.round(scalePct * 100)}% in ${key} ${scale}`, 'fail'));
+  }
   checks.push(check('register', 'Lead register', lowLeads === 0, lowLeads ? `${lowLeads} lead notes too low` : 'Leads sit above the bass', 'warn'));
   checks.push(check('voices', 'Active instruments', active.length >= 4, `${active.length} channels`, 'warn'));
 

@@ -7,6 +7,7 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
 
 export interface AudioStemAnalysis {
   bpm: number;
+  sourceBpm?: number;
   key: string;
   scale: string;
   durationSec: number;
@@ -43,7 +44,12 @@ const ev = (midi: number, startTick: number, durationTicks: number, velocity: nu
 function downsample(input: Float32Array, from: number, to: number) {
   const ratio = from / to;
   const out = new Float32Array(Math.floor(input.length / ratio));
-  for (let i = 0; i < out.length; i++) out[i] = input[Math.floor(i * ratio)] || 0;
+  for (let i = 0; i < out.length; i++) {
+    const x = i * ratio;
+    const i0 = Math.floor(x);
+    const f = x - i0;
+    out[i] = (input[i0] || 0) * (1 - f) + (input[i0 + 1] || 0) * f;
+  }
   return out;
 }
 
@@ -146,6 +152,12 @@ function yinHz(frame: Float32Array, sr: number, minF = 110, maxF = 900): number 
   return hz;
 }
 
+function yinPitch(frame: Float32Array, sr: number, minF: number, maxF: number): { hz: number; conf: number } | null {
+  const hz = yinHz(frame, sr, minF, maxF);
+  if (!hz) return null;
+  return { hz, conf: 0.82 };
+}
+
 function hzToMidi(hz: number) {
   return 69 + 12 * Math.log2(hz / 440);
 }
@@ -186,86 +198,82 @@ function secToTick(sec: number, bpm: number) {
   return Math.round((sec * bpm * 480) / 60 / 30) * 30;
 }
 
-function median(values: number[]) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
+function softSnap(midi: number, key: string, scale: string) {
+  const raw = Math.round(midi);
+  const snapped = theoryEngine.snapMidiToScale(raw, key, scale);
+  return Math.abs(snapped - raw) <= 1 ? snapped : raw;
 }
 
-function shapeHookMelody(
+function trackPitch(
+  samples: Float32Array,
+  sr: number,
+  hop: number,
+  frame: number,
+  minF: number,
+  maxF: number,
+  minMidi: number,
+  maxMidi: number
+) {
+  const out: { t: number; m: number; v: number }[] = [];
+  let prev: number | null = null;
+  for (let i = 0; i + frame < samples.length; i += hop) {
+    const win = samples.subarray(i, i + frame);
+    let e = 0;
+    for (let j = 0; j < win.length; j++) e += win[j] * win[j];
+    const rms = Math.sqrt(e / win.length);
+    if (rms < 0.006) { prev = null; continue; }
+    const hit = yinPitch(win, sr, minF, maxF);
+    if (!hit || hit.conf < 0.55) { continue; }
+    let midi = hzToMidi(hit.hz);
+    if (prev != null) {
+      const down = midi - 12;
+      const up = midi + 12;
+      if (Math.abs(down - prev) + 1.2 < Math.abs(midi - prev)) midi = down;
+      else if (Math.abs(up - prev) + 1.2 < Math.abs(midi - prev)) midi = up;
+    }
+    if (midi < minMidi || midi > maxMidi) continue;
+    prev = midi;
+    out.push({ t: i / sr, m: midi, v: Math.min(1, 0.3 + rms * 8) * hit.conf });
+  }
+  if (out.length < 5) return out;
+  const smooth = out.map((p, i) => {
+    const a = out[Math.max(0, i - 2)].m;
+    const b = out[i].m;
+    const c = out[Math.min(out.length - 1, i + 2)].m;
+    return { ...p, m: [a, b, c].sort((x, y) => x - y)[1] };
+  });
+  return smooth;
+}
+
+function contourToNotes(
   frames: { t: number; m: number; v: number }[],
   bpm: number,
   key: string,
   scale: string
 ): NoteEvent[] {
   if (!frames.length) return [];
-  const stepSec = 60 / bpm / 4;
-  const lastT = frames[frames.length - 1].t;
-  const nSteps = Math.min(512, Math.max(32, Math.ceil(lastT / stepSec)));
-  const slots: { midi: number; vel: number }[] = [];
-  for (let s = 0; s < nSteps; s++) {
-    const t0 = s * stepSec;
-    const inSlot = frames.filter((f) => f.t >= t0 && f.t < t0 + stepSec);
-    if (inSlot.length < 2) {
-      slots.push({ midi: -1, vel: 0 });
-      continue;
+  const notes: NoteEvent[] = [];
+  let start = frames[0];
+  let last = frames[0];
+  const flush = () => {
+    const hold = last.t - start.t + 0.04;
+    if (hold < 0.06) return;
+    const midi = softSnap((start.m + last.m) * 0.5, key, scale);
+    notes.push(ev(midi, secToTick(start.t, bpm), (hold * bpm * 480) / 60, last.v));
+  };
+  for (let i = 1; i < frames.length; i++) {
+    const cur = frames[i];
+    const same = Math.abs(cur.m - last.m) < 0.7;
+    const close = cur.t - last.t < 0.12;
+    if (same && close) last = cur;
+    else {
+      flush();
+      start = cur;
+      last = cur;
     }
-    const ms = inSlot.map((f) => f.m);
-    const spread = Math.max(...ms) - Math.min(...ms);
-    const vel = inSlot.reduce((a, f) => a + f.v, 0) / inSlot.length;
-    if (spread > 3.2 || vel < 0.32) {
-      slots.push({ midi: -1, vel: 0 });
-      continue;
-    }
-    let snapped = theoryEngine.snapMidiToScale(Math.round(median(ms)), key, scale);
-    while (snapped < 57) snapped += 12;
-    while (snapped > 86) snapped -= 12;
-    slots.push({ midi: snapped, vel });
   }
-
-  const raw: NoteEvent[] = [];
-  for (let i = 0; i < slots.length; ) {
-    if (slots[i].midi < 0) { i++; continue; }
-    let j = i + 1;
-    while (j < slots.length && slots[j].midi === slots[i].midi) j++;
-    const len = j - i;
-    const onBeat = i % 4 === 0 || i % 4 === 2;
-    if (len === 1 && !onBeat) { i = j; continue; }
-    raw.push(ev(slots[i].midi, i * 120, Math.max(120, len * 120 - 8), slots[i].vel));
-    i = j;
-  }
-  if (!raw.length) return [];
-
-  const winSteps = 128;
-  let best = { start: 0, score: -999 };
-  for (let s = 0; s + 32 <= nSteps; s += 16) {
-    const end = Math.min(nSteps, s + winSteps);
-    const slice = raw.filter((n) => (n.startTick || 0) >= s * 120 && (n.startTick || 0) < end * 120);
-    if (slice.length < 5) continue;
-    const pitches = slice.map((n) => theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note));
-    const unique = new Set(pitches.map((p) => p % 12)).size;
-    const range = Math.max(...pitches) - Math.min(...pitches);
-    const density = slice.length;
-    const score = Math.min(unique, 6) * 3 + Math.min(range, 14) - Math.abs(density - 10) * 0.8;
-    if (score > best.score) best = { start: s, score };
-  }
-
-  const hook = raw
-    .filter((n) => {
-      const t = n.startTick || 0;
-      return t >= best.start * 120 && t < (best.start + winSteps) * 120;
-    })
-    .map((n) => ev(
-      theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note),
-      (n.startTick || 0) - best.start * 120,
-      Math.max(160, n.durationTicks || 160),
-      n.velocity || 0.8
-    ));
-
-  if (hook.length > 18) {
-    return hook.filter((_, i) => i % 2 === 0 || ((hook[i].startTick || 0) / 120) % 4 === 0);
-  }
-  return hook.length ? hook : raw.slice(0, 12);
+  flush();
+  return notes;
 }
 
 function buildKickMask(hits: number[], bpm: number) {
@@ -303,19 +311,18 @@ export async function analyzeSongToStems(
         return m;
       })()
     : decoded.getChannelData(0);
-  const take = Math.min(src.length, Math.floor(decoded.sampleRate * 90));
+  const take = Math.min(src.length, Math.floor(decoded.sampleRate * 150));
   const slice = src.subarray(0, take);
-  const sr = 11025;
+  const sr = 16000;
   const mono = downsample(slice, decoded.sampleRate, sr);
-  const hop = 512;
+  const hop = 320;
   const flux = simpleFlux(mono, hop);
   const detectedBpm = estimateBpm(flux, hop, sr);
   const targetBpm = override?.bpm && override.bpm >= 80 ? override.bpm : detectedBpm;
-  const bpm = detectedBpm;
   onProgress?.(40);
-  const low = applyBand(mono, sr, 20, 160);
+  const low = applyBand(mono, sr, 30, 180);
   const high = applyBand(mono, sr, 5000, 9000);
-  const mid = applyBand(mono, sr, 480, 2400);
+  const mid = applyBand(mono, sr, 220, 2800);
   const lowFlux = simpleFlux(low, hop);
   const highFlux = simpleFlux(high, hop);
   const kickHits = peakTimes(lowFlux, hop, sr, 1.7);
@@ -324,39 +331,29 @@ export async function analyzeSongToStems(
   onProgress?.(55);
 
   const frame = 1024;
-  const hopP = 256;
-  const midis: { t: number; m: number; v: number }[] = [];
+  const hopP = 320;
+  const midis = trackPitch(mid, sr, hopP, frame, 196, 1200, 55, 91);
+  const bassFrames = trackPitch(low, sr, hopP, frame, 40, 200, 24, 50);
   const hist = new Array(12).fill(0);
-  for (let i = 0; i + frame < mid.length; i += hopP) {
-    const win = mid.subarray(i, i + frame);
-    let e = 0;
-    for (let j = 0; j < win.length; j++) e += win[j] * win[j];
-    const rms = Math.sqrt(e / win.length);
-    if (rms < 0.01) continue;
-    const hz = yinHz(win, sr, 180, 1100);
-    if (!hz) continue;
-    const midi = hzToMidi(hz);
-    if (midi < 55 || midi > 88) continue;
-    hist[Math.round(midi) % 12] += rms;
-    midis.push({ t: i / sr, m: midi, v: Math.min(1, 0.35 + rms * 9) });
-  }
+  midis.forEach((p) => { hist[Math.round(p.m) % 12] += p.v; });
   const guessed = chromaKey(hist);
   const key = override?.key || guessed.key;
   const scale = override?.scale || guessed.scale;
   onProgress?.(72);
 
-  const lead = shapeHookMelody(midis, detectedBpm, key, scale);
-  const bassNotes = lead.filter((_, i) => i % 3 === 0).map((n) => {
+  const lead = contourToNotes(midis, detectedBpm, key, scale);
+  const bassNotes = contourToNotes(bassFrames, detectedBpm, key, scale).map((n) => {
     let m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
     while (m > 43) m -= 12;
-    while (m < 28) m += 12;
-    return ev(m, n.startTick || 0, Math.min(240, n.durationTicks || 120), 0.82);
+    while (m < 24) m += 12;
+    return ev(m, n.startTick || 0, Math.min(280, n.durationTicks || 120), 0.84);
   });
 
   await ctx.close();
   onProgress?.(84);
   return {
     bpm: targetBpm,
+    sourceBpm: detectedBpm,
     key,
     scale,
     durationSec: decoded.duration,
@@ -378,90 +375,42 @@ export async function analyzeSongToStems(
   };
 }
 
-function tileLead(source: NoteEvent[], startBar: number, bars: number, lift = 0) {
-  if (!source.length) return [];
-  const loopTicks = Math.max(1920, Math.max(...source.map((n) => (n.startTick || 0) + (n.durationTicks || 120))));
-  const loopBars = Math.max(4, Math.ceil(loopTicks / 1920));
-  const loopLen = loopBars * 1920;
-  const out: NoteEvent[] = [];
-  for (let bar = 0; bar < bars; bar += loopBars) {
-    const offset = (startBar + bar) * 1920;
-    source.forEach((n) => {
-      const local = (n.startTick || 0) % loopLen;
-      if (bar * 1920 + local >= bars * 1920) return;
-      let midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) + lift;
-      out.push(ev(midi, offset + local, n.durationTicks || 160, n.velocity || 0.8));
-    });
-  }
-  return out;
-}
-
 export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: ArrangeOptions): GrooveObject {
   const bpm = options.bpm && options.bpm > 40 ? options.bpm : analysis.bpm;
   const key = options.key || analysis.key;
   const scale = options.scale || analysis.scale;
-  const PREVIEW_BARS = 32;
-  const minutes = (PREVIEW_BARS * 4) / Math.max(80, bpm);
+  const sourceBpm = Math.max(80, analysis.sourceBpm || analysis.bpm || bpm);
+  const tickScale = bpm / sourceBpm;
+  const lastLead = analysis.lead.reduce((m, n) => Math.max(m, (n.startTick || 0) + (n.durationTicks || 0)), 0);
+  const totalBars = Math.min(96, Math.max(16, Math.ceil((lastLead * tickScale) / 1920) + 2));
+  const minutes = (totalBars * 4) / Math.max(80, bpm);
   const groove = composeProfessionalTrack(
     { bpm, key, scale, genre: options.genre, trackName: options.trackName || `From Audio · ${key} ${scale}` },
     minutes,
     [...ELITE_16_CHANNELS]
   );
 
-  const extracted = analysis.lead.map((n) => {
-    let midi = theoryEngine.snapMidiToScale(
-      theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note),
-      key,
-      scale
+  const place = (n: NoteEvent, extraVel = 0) => {
+    const midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+    return ev(
+      midi,
+      Math.round((n.startTick || 0) * tickScale),
+      Math.max(50, Math.round((n.durationTicks || 160) * tickScale)),
+      Math.min(1, (n.velocity || 0.8) + extraVel)
     );
-    while (midi < 57) midi += 12;
-    while (midi > 86) midi -= 12;
-    return ev(midi, n.startTick || 0, Math.max(160, n.durationTicks || 240), n.velocity || 0.85);
-  });
-
-  const hero = extracted.length ? extracted : groove.ch4_leadA.slice(0, 12);
-  const totalBars = Math.min(64, groove.totalBars || 64);
-  const leadOut: NoteEvent[] = [];
-  const writeHook = (startBar: number, bars: number, mode: 'hint' | 'theme' | 'lift' | 'break') => {
-    if (!hero.length) return;
-    const loopTicks = Math.max(1920 * 4, Math.max(...hero.map((n) => (n.startTick || 0) + (n.durationTicks || 160))));
-    const loopBars = Math.max(4, Math.ceil(loopTicks / 1920));
-    for (let bar = 0; bar < bars; bar += loopBars) {
-      hero.forEach((n, idx) => {
-        const local = (n.startTick || 0) % (loopBars * 1920);
-        if (bar * 1920 + local >= bars * 1920) return;
-        if (mode === 'hint' && idx % 2 === 1) return;
-        if (mode === 'break' && idx > 2) return;
-        let midi = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-        if (mode === 'lift') midi += 12;
-        const dur = mode === 'break' ? Math.max(480, n.durationTicks || 240) : Math.max(160, n.durationTicks || 200);
-        const vel = mode === 'hint' ? 0.55 : mode === 'break' ? 0.62 : 0.9;
-        leadOut.push(ev(midi, (startBar + bar) * 1920 + local, dur, vel));
-      });
-    }
   };
 
-  (groove.structureMap || []).forEach((section) => {
-    if (section.startBar >= totalBars) return;
-    const bars = Math.min(section.durationBars, totalBars - section.startBar);
-    const type = String(section.type);
-    if (type === 'INTRO') writeHook(section.startBar + Math.max(0, bars - 4), Math.min(4, bars), 'hint');
-    else if (type === 'BREAKDOWN' || type.includes('BREAK')) writeHook(section.startBar, bars, 'break');
-    else if (type === 'DROP' && section.startBar > 40) writeHook(section.startBar, bars, 'lift');
-    else if (type === 'DROP' || type === 'BUILDUP') writeHook(section.startBar, bars, 'theme');
-    else if (type.includes('MELODY') || type.includes('GROOVE')) {
-      writeHook(section.startBar + 4, Math.max(4, bars - 4), 'hint');
-    }
-  });
-  if (!leadOut.length && hero.length) writeHook(8, 16, 'theme');
-  groove.ch4_leadA = leadOut
+  const extracted = analysis.lead.map((n) => place(n, 0.1));
+  groove.ch4_leadA = extracted
     .filter((n) => (n.startTick || 0) < totalBars * 1920)
     .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
 
-  groove.ch5_leadB = groove.ch4_leadA.filter((_, i) => i % 4 === 0).map((n) => {
-    const m = theoryEngine.snapMidiToScale(theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) + 7, key, scale);
-    return ev(m, n.startTick || 0, Math.max(240, (n.durationTicks || 160) + 40), 0.38);
-  });
+  groove.ch5_leadB = groove.ch4_leadA
+    .filter((n) => (n.durationTicks || 0) >= 240)
+    .map((n) => {
+      const m = softSnap(theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) + 7, key, scale);
+      return ev(m, n.startTick || 0, n.durationTicks || 240, 0.36);
+    });
 
   const intervals = theoryEngine.getScaleIntervals(scale);
   const root = theoryEngine.getMidiNote(`${key}3`);
@@ -521,38 +470,33 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   }
   if (styledKick.length) groove.ch1_kick = styledKick;
 
-  const bassSrc = analysis.bassNotes.length ? analysis.bassNotes : extracted;
+  const bassSrc = (analysis.bassNotes.length ? analysis.bassNotes : extracted).map((n) => place(n));
   if (bassSrc.length) {
-    groove.ch2_sub = tileLead(bassSrc.map((n) => {
+    groove.ch2_sub = bassSrc.map((n) => {
       let m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
       while (m > 43) m -= 12;
       while (m < 24) m += 12;
-      return ev(m, n.startTick || 0, 90, 0.84);
-    }), 8, Math.max(16, totalBars - 16));
+      return ev(m, n.startTick || 0, Math.min(240, n.durationTicks || 120), 0.84);
+    }).filter((n) => (n.startTick || 0) < totalBars * 1920);
   }
 
-  const lastTick = PREVIEW_BARS * 1920;
-  const keepAcross = (notes: NoteEvent[], max: number) => {
-    const inRange = notes
+  const lastTick = totalBars * 1920;
+  ELITE_16_CHANNELS.forEach((ch) => {
+    const notes = (((groove as any)[ch] || []) as NoteEvent[])
       .filter((n) => (n.startTick || 0) < lastTick)
       .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
-    if (inRange.length <= max) return inRange;
-    const out: NoteEvent[] = [];
-    const step = inRange.length / max;
-    for (let i = 0; i < max; i++) out.push(inRange[Math.min(inRange.length - 1, Math.floor(i * step))]);
-    return out;
-  };
-  ELITE_16_CHANNELS.forEach((ch) => {
-    const notes = ((groove as any)[ch] || []) as NoteEvent[];
-    const cap = ch.includes('lead') || ch.includes('acid') || ch.includes('kick') || ch.includes('sub') ? 360 : 180;
-    (groove as any)[ch] = keepAcross(notes, cap);
+    if (ch === 'ch4_leadA' || ch === 'ch2_sub') {
+      (groove as any)[ch] = notes.slice(0, 1200);
+      return;
+    }
+    (groove as any)[ch] = notes.slice(0, ch.includes('kick') ? 600 : 220);
   });
-  groove.totalBars = PREVIEW_BARS;
+  groove.totalBars = totalBars;
 
   groove.meta = {
     ...(groove.meta || {}),
-    architecture: 'Audio melody + style arrangement',
-    sourceBpm: analysis.bpm,
+    architecture: 'Full-song melody transcription',
+    sourceBpm: analysis.sourceBpm || analysis.bpm,
     detectedChannels: analysis.detected,
     leadNotes: analysis.lead.length,
   };

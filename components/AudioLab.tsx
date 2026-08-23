@@ -88,7 +88,7 @@ const LabPianoRoll: React.FC<{ groove: GrooveObject, progress: number }> = ({ gr
                 <div className="flex items-center gap-2"><div className="w-2 h-2 bg-blue-500 rounded-full" /><span className="text-[10px] font-bold">Scale Sync</span></div>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 bg-amber-500 rounded-full" /><span className="text-[10px] font-bold">Acoustic Signal</span></div>
                 <div className="h-3 w-[1px] bg-white/10 mx-1" />
-                <div className="flex items-center gap-2 text-sky-400"><Star size={10} /><span className="text-[10px] font-black uppercase">16-channel trance map</span></div>
+                <div className="flex items-center gap-2 text-sky-400"><Star size={10} /><span className="text-[10px] font-black uppercase">Original melody transcription</span></div>
             </div>
         </div>
     );
@@ -101,7 +101,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
     const [manualBpm, setManualBpm] = useState<number>(145);
-    const [autoBpm, setAutoBpm] = useState(false);
+    const [autoBpm, setAutoBpm] = useState(true);
     const [showSettings, setShowSettings] = useState(true);
     const [pickError, setPickError] = useState<string | null>(null);
     const [genre, setGenre] = useState<MusicGenre>(MusicGenre.PSYTRANCE_FULLON);
@@ -225,7 +225,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                 <span className="text-xs font-black text-white">BPM</span>
                             </div>
                             <p className="text-[11px] text-gray-300 mt-2" dir="rtl">
-                                בחרו קצב ואז את הקובץ. הניתוח ייצא ב־{manualBpm} BPM{autoBpm ? ' (או אוטומטי מהשיר)' : ''}.
+                                {autoBpm ? 'AUTO: הקצב יילקח מהשיר המקורי כדי שהמלודיה תתאים.' : `המלודיה נשמרת מהמקור, וההשמעה תהיה ב־${manualBpm} BPM.`}
                             </p>
                         </div>
                         {showSettings && (
@@ -281,22 +281,22 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                 <p className="mt-4 text-sm text-amber-400 text-center max-w-sm font-bold" dir="rtl">{pickError}</p>
                             )}
                         </div>
-                        
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Layers className="text-blue-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">כל 16 הערוצים</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">Kick, Bass, Hats, Acid, Pad ו-FX נבנים יחד. המלודיה הראשית מובילה.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">מלודיה מהמקור</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">המלודיה מתומללת מהשיר עצמו, בזמן המקורי. שאר הערוצים תומכים בה.</p>
                             </div>
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Zap className="text-amber-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">טראנס לפי הסגנון</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">השיר מנותח, ואז מסודר לפי הסגנון וה-BPM שבחרתם באתר.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">קצב השיר</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">AUTO לוקח את ה-BPM מהקובץ. אפשר לבחור קצב ידני לפני ההעלאה.</p>
                             </div>
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <ShieldCheck className="text-green-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">מלודיה מורכבת</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">הקו הראשי מתפתח ב-drop עם וריאציות, לא קו יחיד שטוח.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">תואם למקור</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">לא הוק מקוצר. כל קו הליד מהקובץ נשמר לאורך השיר.</p>
                             </div>
                         </div>
                     </div>
@@ -313,8 +313,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             <p className="text-blue-400 font-mono text-[10px] uppercase tracking-[0.2em] mt-2">
                                 {activeJob.progress < 20 ? "Decoding song..." :
                                  activeJob.progress < 45 ? "Finding tempo & kick..." :
-                                 activeJob.progress < 75 ? "Extracting main melody..." :
-                                 "Building 16-channel trance map..."}
+                                 activeJob.progress < 75 ? "Transcribing the original melody..." :
+                                 "Placing the full melody on the lead..."}
                             </p>
                         </div>
                         <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden shadow-inner">
