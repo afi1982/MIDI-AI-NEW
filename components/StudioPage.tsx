@@ -46,6 +46,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const [showBottomEditor, setShowBottomEditor] = useState(window.innerWidth >= 768);
     const [isAudioInitialized, setIsAudioInitialized] = useState(false);
     const [timelineZoom, setTimelineZoom] = useState(window.innerWidth < 768 ? 40 : 120);
+    const [playError, setPlayError] = useState<string | null>(null);
+    const grooveRef = useRef(groove);
+    grooveRef.current = groove;
 
     useEffect(() => {
         let raf: number;
@@ -66,20 +69,23 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     };
 
     const syncEngine = async (g: GrooveObject) => {
-        if (!isAudioInitialized || Tone.context.state !== 'running') {
-            await audioService.ensureInit();
-            setIsAudioInitialized(true);
-        }
-        audioService.setBpm(currentBpm);
-        await audioService.scheduleSequence({ ...g, bpm: currentBpm });
+        await audioService.ensureInit();
+        setIsAudioInitialized(true);
+        audioService.setBpm(g.bpm || currentBpm);
+        return audioService.scheduleSequence({ ...g, bpm: g.bpm || currentBpm });
     };
 
     const handlePlay = async () => {
         if (isPlaying) {
             audioService.stop();
-        } else {
-            await syncEngine(groove);
-            audioService.play();
+            return;
+        }
+        setPlayError(null);
+        try {
+            await syncEngine(grooveRef.current);
+            await audioService.play(playbackTime > 1 ? playbackTime : 0);
+        } catch (err: any) {
+            setPlayError(err?.message || 'לא מצליחים להשמיע. לחצו Play שוב.');
         }
     };
 
@@ -93,13 +99,17 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
         const file = e.target.files?.[0];
         if (!file) return;
         try {
+            audioService.stop();
             const { groove: newGroove } = await importMidiAsGroove(file);
             setGroove(newGroove);
+            grooveRef.current = newGroove;
             onUpdate(newGroove);
             setCurrentBpm(newGroove.bpm || 145);
-            if (isPlaying) await syncEngine(newGroove);
-        } catch (err) {
-            alert("Signal Error: " + err);
+            setPlaybackTime(0);
+            setPlayError(null);
+            await syncEngine(newGroove);
+        } catch (err: any) {
+            setPlayError(err?.message || String(err));
         } finally {
             e.target.value = '';
         }
@@ -150,7 +160,10 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     }, []);
 
     return (
-        <div className="flex flex-col h-full bg-[#050507] text-[#E2E8F0] font-sans overflow-hidden select-none">
+        <div
+            className="flex flex-col h-full bg-[#050507] text-[#E2E8F0] font-sans overflow-hidden select-none"
+            onPointerDown={() => { void audioService.unlock(); }}
+        >
             <div className="h-14 md:h-16 shrink-0 bg-[#0A0A0B] border-b border-white/5 flex items-center justify-between px-2 md:px-6 z-[100] shadow-2xl">
                 <div className="flex items-center gap-1 md:gap-4 overflow-hidden">
                     <button onClick={() => { audioService.stop(); onClose(); }} className="p-1.5 md:p-2 bg-white/5 hover:bg-white/10 rounded-lg md:rounded-xl transition-all text-gray-400">

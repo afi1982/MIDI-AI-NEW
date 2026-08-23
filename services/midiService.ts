@@ -203,16 +203,62 @@ export const downloadAnalyzedMidi = async (segments: GrooveObject[]) => {
     await downloadFullArrangementMidi(masterGroove);
 };
 
+const INTERNAL_FROM_FILE = (ticks: number, ppq: number) => Math.round((ticks * INTERNAL_PPQ) / Math.max(1, ppq));
+
+const noteFromMidi = (midiNum: number, ticks: number, durationTicks: number, velocity: number): NoteEvent => {
+    const startTick = Math.max(0, ticks);
+    const bar = Math.floor(startTick / 1920);
+    const beat = Math.floor((startTick % 1920) / 480);
+    const sixteen = Math.floor((startTick % 480) / 120);
+    return {
+        note: theoryEngine.midiToNote(midiNum),
+        duration: 'custom',
+        durationTicks: Math.max(20, durationTicks || 120),
+        startTick,
+        time: `${bar}:${beat}:${sixteen}`,
+        velocity: Math.max(0.25, Math.min(1, velocity || 0.8)),
+    };
+};
+
+const resolveImportChannel = (trackName: string, channelIndex: number, midiNum?: number): ChannelKey => {
+    const name = (trackName || '').toLowerCase().replace(/[_-]+/g, ' ');
+    const rules: { key: ChannelKey; needles: string[] }[] = [
+        { key: 'ch1_kick', needles: ['kick', 'bd ', ' bass drum'] },
+        { key: 'ch2_sub', needles: ['sub'] },
+        { key: 'ch3_midBass', needles: ['mid bass', 'midbass', 'baseline'] },
+        { key: 'ch4_leadA', needles: ['lead a', 'hero', 'lead'] },
+        { key: 'ch5_leadB', needles: ['lead b', 'harmony'] },
+        { key: 'ch6_arpA', needles: ['arp a', 'arp'] },
+        { key: 'ch7_arpB', needles: ['arp b'] },
+        { key: 'ch8_snare', needles: ['snare', 'sd'] },
+        { key: 'ch9_clap', needles: ['clap'] },
+        { key: 'ch10_percLoop', needles: ['perc loop', 'perc'] },
+        { key: 'ch11_percTribal', needles: ['tribal'] },
+        { key: 'ch12_hhClosed', needles: ['hh closed', 'closed', 'hihat', 'hhc'] },
+        { key: 'ch13_hhOpen', needles: ['hh open', 'open hat', 'hho'] },
+        { key: 'ch14_acid', needles: ['acid', '303'] },
+        { key: 'ch15_pad', needles: ['pad', 'atmos'] },
+        { key: 'ch16_synth', needles: ['synth', 'fx'] },
+    ];
+    for (const rule of rules) {
+        if (rule.needles.some((n) => name.includes(n))) return rule.key;
+    }
+    if (midiNum === 36) return 'ch1_kick';
+    if (midiNum === 38) return 'ch8_snare';
+    if (midiNum === 39) return 'ch9_clap';
+    if (midiNum === 42) return 'ch12_hhClosed';
+    if (midiNum === 46) return 'ch13_hhOpen';
+    return ELITE_16_CHANNELS[Math.min(channelIndex, ELITE_16_CHANNELS.length - 1)];
+};
+
 export const importMidiNotesToTrack = async (file: File): Promise<NoteEvent[]> => {
     const arrayBuffer = await file.arrayBuffer();
     const midi = new Midi(arrayBuffer);
+    const ppq = midi.header.ppq || 480;
     const events: NoteEvent[] = [];
-    midi.tracks.forEach(track => {
-        track.notes.forEach(n => {
-            const bar = Math.floor(n.ticks / 1920);
-            const beat = Math.floor((n.ticks % 1920) / 480);
-            const sixteen = Math.floor((n.ticks % 480) / 120);
-            events.push({ note: theoryEngine.midiToNote(n.midi), duration: "custom", durationTicks: n.durationTicks, startTick: n.ticks, time: `${bar}:${beat}:${sixteen}`, velocity: n.velocity });
+    midi.tracks.forEach((track) => {
+        track.notes.forEach((n) => {
+            events.push(noteFromMidi(n.midi, INTERNAL_FROM_FILE(n.ticks, ppq), INTERNAL_FROM_FILE(n.durationTicks, ppq), n.velocity));
         });
     });
     return events;
@@ -221,23 +267,37 @@ export const importMidiNotesToTrack = async (file: File): Promise<NoteEvent[]> =
 export const importMidiAsGroove = async (file: File): Promise<{ groove: GrooveObject }> => {
     const arrayBuffer = await file.arrayBuffer();
     const midi = new Midi(arrayBuffer);
-    const bpm = midi.header.tempos[0]?.bpm || 145;
-    const groove: any = { id: `IMPORT_${Date.now()}`, name: file.name.split('.')[0], bpm: Math.round(bpm), key: "C", scale: "Minor", totalBars: Math.ceil(midi.durationTicks / 1920) };
-    ELITE_16_CHANNELS.forEach(ch => groove[ch] = []);
+    const ppq = midi.header.ppq || 480;
+    const bpm = Math.round(midi.header.tempos[0]?.bpm || 145);
+    const groove: any = {
+        id: `IMPORT_${Date.now()}`,
+        name: file.name.replace(/\.[^.]+$/, ''),
+        bpm,
+        key: 'F#',
+        scale: 'Phrygian',
+        totalBars: 32,
+    };
+    ELITE_16_CHANNELS.forEach((ch) => { groove[ch] = []; });
+
+    let maxTick = 0;
+    const used = new Set<ChannelKey>();
     midi.tracks.forEach((track, i) => {
-        const trackName = track.name.toLowerCase();
-        let targetChannel: ChannelKey | null = null;
-        for (const key of ELITE_16_CHANNELS) { if (trackName.includes(key.toLowerCase()) || trackName.includes(key.split('_')[1].toLowerCase())) { targetChannel = key; break; } }
-        if (!targetChannel && i < ELITE_16_CHANNELS.length) { targetChannel = ELITE_16_CHANNELS[i]; }
-        if (targetChannel) {
-            const notes = track.notes.map(n => {
-                const bar = Math.floor(n.ticks / 1920);
-                const beat = Math.floor((n.ticks % 1920) / 480);
-                const sixteen = Math.floor((n.ticks % 480) / 120);
-                return { note: theoryEngine.midiToNote(n.midi), duration: "custom", durationTicks: n.durationTicks, startTick: n.ticks, time: `${bar}:${beat}:${sixteen}`, velocity: n.velocity };
-            });
-            groove[targetChannel] = [...(groove[targetChannel] || []), ...notes];
+        if (!track.notes.length) return;
+        const first = track.notes[0];
+        let target = resolveImportChannel(track.name || '', i, first?.midi);
+        if (used.has(target) && !track.name) {
+            target = ELITE_16_CHANNELS.find((ch) => !used.has(ch)) || target;
         }
+        used.add(target);
+        track.notes.forEach((n) => {
+            const evn = noteFromMidi(n.midi, INTERNAL_FROM_FILE(n.ticks, ppq), INTERNAL_FROM_FILE(n.durationTicks, ppq), n.velocity);
+            groove[target].push(evn);
+            maxTick = Math.max(maxTick, (evn.startTick || 0) + (evn.durationTicks || 0));
+        });
     });
+
+    groove.totalBars = Math.max(8, Math.ceil(maxTick / 1920) + 1);
+    const totalNotes = ELITE_16_CHANNELS.reduce((s, ch) => s + (groove[ch] as NoteEvent[]).length, 0);
+    if (!totalNotes) throw new Error('הקובץ לא מכיל תווים שאפשר להשמיע.');
     return { groove: groove as GrooveObject };
 };

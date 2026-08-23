@@ -278,9 +278,10 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                         <div>
                             <h2 className="text-3xl font-black uppercase italic tracking-tight text-white">{activeJob.progress}% Processing Audio</h2>
                             <p className="text-blue-400 font-mono text-[10px] uppercase tracking-[0.2em] mt-2">
-                                {activeJob.progress < 15 ? "Decoding Audio Signal..." : 
-                                 activeJob.progress < 30 ? "Slicing Acoustic Source..." : 
-                                 "Extracting Melodies & Notes..."}
+                                {activeJob.progress < 20 ? "Decoding song..." :
+                                 activeJob.progress < 45 ? "Finding tempo & kick..." :
+                                 activeJob.progress < 75 ? "Extracting main melody..." :
+                                 "Building 16-channel trance map..."}
                             </p>
                         </div>
                         <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden shadow-inner">
