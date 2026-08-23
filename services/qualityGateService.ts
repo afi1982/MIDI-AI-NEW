@@ -102,7 +102,7 @@ function healGroove(groove: GrooveObject, tool: QualityTool = 'TRACK'): string[]
 
 export function inspectAndHealGroove(groove: GrooveObject, tool: QualityTool = 'TRACK'): { groove: GrooveObject, report: QualityReport } {
   const next = JSON.parse(JSON.stringify(groove)) as GrooveObject;
-  const healed = healGroove(next);
+  const healed = healGroove(next, tool);
   const checks: QualityCheck[] = [];
   const bars = next.totalBars || 64;
   const key = next.key || 'F#';

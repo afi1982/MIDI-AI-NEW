@@ -174,7 +174,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                     <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full shrink-0"><ArrowLeft size={20} /></button>
                     <div className="flex flex-col min-w-0">
                         <h1 className="text-base md:text-2xl font-black uppercase tracking-tighter italic leading-none truncate">Audio to <span className="text-blue-500">MIDI</span></h1>
-                        <p className="hidden sm:block text-[9px] text-gray-500 font-bold uppercase tracking-[0.2em] mt-1">Convert Audio Files to MIDI V117</p>
+                        <p className="hidden sm:block text-[9px] text-gray-500 font-bold uppercase tracking-[0.2em] mt-1">1:1 melody transcription</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 md:gap-3 shrink-0">
@@ -243,6 +243,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                 <label className="bg-black/40 p-3 rounded-xl border border-white/5">
                                     <span className="text-[8px] font-black text-gray-500 uppercase">Key</span>
                                     <select value={keyName} onChange={(e) => setKeyName(e.target.value)} className="w-full bg-transparent text-white text-xs font-bold outline-none mt-1">
+                                        <option value="AUTO" className="bg-black">AUTO</option>
                                         {Object.values(MusicalKey).map((k) => <option key={k} value={k} className="bg-black">{k}</option>)}
                                     </select>
                                 </label>
@@ -269,7 +270,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             </div>
                             <h3 className="text-lg font-black uppercase tracking-widest text-white italic text-center">Audio to MIDI</h3>
                             <p className="text-sm text-gray-200 font-medium mt-3 text-center max-w-sm" dir="rtl">
-                                בחרו שיר (MP3 / WAV / M4A). לא קובץ MIDI.
+                                בחרו שיר (MP3 / WAV / M4A). המערכת תתמלל את המלודיה הראשית 1:1 מהמקור — לא קובץ MIDI.
                             </p>
                             <p className="text-[11px] text-amber-200/90 mt-2 text-center max-w-xs leading-relaxed" dir="rtl">
                                 בסמסונג: אם מסומן «אודיו» תראו רק .mid. לחצו «מסמך» למעלה, או השתמשו בכפתור «כל הקבצים».
@@ -290,8 +291,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Layers className="text-blue-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">מלודיה מהמקור</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">המלודיה מתומללת מהשיר עצמו, בזמן המקורי. שאר הערוצים תומכים בה.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">מלודיה 1:1</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">מעקב תו־אחר־תו אחרי הליד של השיר. בלי טראנס מומצא ובלי שינוי סולם.</p>
                             </div>
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Zap className="text-amber-500 mb-3" size={20} />
@@ -301,7 +302,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <ShieldCheck className="text-green-500 mb-3" size={20} />
                                 <h4 className="text-xs font-black uppercase mb-2">תואם למקור</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">לא הוק מקוצר. כל קו הליד מהקובץ נשמר לאורך השיר.</p>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">התווים נשארים כמו בשיר. לא מייצרים הוק חדש ולא משנים גובה צליל.</p>
                             </div>
                         </div>
                     </div>
@@ -316,10 +317,10 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                         <div>
                             <h2 className="text-3xl font-black uppercase italic tracking-tight text-white">{activeJob.progress}% Processing Audio</h2>
                             <p className="text-blue-400 font-mono text-[10px] uppercase tracking-[0.2em] mt-2">
-                                {activeJob.progress < 20 ? "Decoding song..." :
+                                 {activeJob.progress < 20 ? "Decoding song..." :
                                  activeJob.progress < 45 ? "Finding tempo & kick..." :
-                                 activeJob.progress < 75 ? "Transcribing the original melody..." :
-                                 "Placing the full melody on the lead..."}
+                                 activeJob.progress < 75 ? "Tracking the original melody note by note..." :
+                                 "Writing the 1:1 lead to MIDI..."}
                             </p>
                         </div>
                         <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden shadow-inner">
@@ -353,15 +354,27 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                 );
                             })}
                         </div>
-                        {onOpenInStudio && (
+                        <p className="text-[12px] text-sky-200/90 text-center font-bold" dir="rtl">
+                            זו תמלול 1:1 של המלודיה מהשיר — האזינו ל־LEAD בסטודיו והשוו לשיר המקורי.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            {onOpenInStudio && (
+                                <button
+                                    type="button"
+                                    onClick={() => onOpenInStudio(activeJob.result)}
+                                    className="flex-1 py-4 rounded-2xl bg-emerald-600 text-white font-black uppercase text-sm"
+                                >
+                                    פתחו בסטודיו והשמיעו
+                                </button>
+                            )}
                             <button
                                 type="button"
-                                onClick={() => onOpenInStudio(activeJob.result)}
-                                className="w-full py-4 rounded-2xl bg-emerald-600 text-white font-black uppercase text-sm"
+                                onClick={() => { setActiveJob(null); setActiveJobId(null); setIsPlaying(false); }}
+                                className="px-4 py-4 rounded-2xl bg-white/10 text-white font-black uppercase text-sm"
                             >
-                                פתחו בסטודיו והשמיעו
+                                שיר חדש
                             </button>
-                        )}
+                        </div>
                         {activeJob.quality && <QualityReportCard report={activeJob.quality} compact />}
                         <div className="flex-1 min-h-[180px] md:min-h-[320px] relative rounded-2xl overflow-hidden border border-white/10">
                             <LabPianoRoll groove={activeJob.result} progress={progress} />
