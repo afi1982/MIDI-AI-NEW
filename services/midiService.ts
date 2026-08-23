@@ -128,55 +128,213 @@ const DRUM_KEYS = new Set<ChannelKey>([
     'ch1_kick', 'ch8_snare', 'ch9_clap', 'ch10_percLoop', 'ch11_percTribal', 'ch12_hhClosed', 'ch13_hhOpen'
 ]);
 
-export const exportMidi = (groove: GrooveObject, selectedChannels?: ChannelKey[]) => {
+/**
+ * @tonejs/midi encodes the key-signature meta event as `keyIndex + 7` where the
+ * Standard MIDI File spec wants the number of sharps/flats in -7..+7 (it should
+ * be `keyIndex - 7`). The result is an out-of-range byte such as sf=20, and
+ * strict readers - python mido / pretty_midi, several DAWs and AI tools -
+ * reject the entire file. We repair the two bytes after encoding.
+ */
+const fixKeySignatureBytes = (bytes: Uint8Array, keySig: { sharps: number; isMinor: boolean } | null): Uint8Array => {
+    for (let i = 0; i + 4 < bytes.length; i++) {
+        if (bytes[i] === 0xff && bytes[i + 1] === 0x59 && bytes[i + 2] === 0x02) {
+            const sf = keySig ? Math.max(-7, Math.min(7, keySig.sharps)) : 0;
+            bytes[i + 3] = sf < 0 ? 256 + sf : sf;      // signed byte
+            bytes[i + 4] = keySig?.isMinor ? 1 : 0;
+        }
+    }
+    return bytes;
+};
+
+export interface ExportOptions {
+    /** Write a single-track Format 0 file - the most widely compatible variant. */
+    flatten?: boolean;
+}
+
+const asciiSafeName = (raw?: string) => {
+    const cleaned = (raw || '')
+        .replace(/[^\w\- ]+/g, '')   // drop non-ASCII / punctuation (Windows + DAW safe)
+        .replace(/\s+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 48);
+    return cleaned || 'MIDI_AI_Track';
+};
+
+/** Allocates a unique MIDI channel per track: drums on 9 (GM), melodic on the rest. */
+const allocateChannels = (keys: ChannelKey[]) => {
+    const map = new Map<ChannelKey, number>();
+    const free = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+    let next = 0;
+    keys.forEach((key) => {
+        if (DRUM_KEYS.has(key)) { map.set(key, 9); return; }
+        map.set(key, free[next % free.length]);
+        next++;
+    });
+    return map;
+};
+
+export const exportMidi = (groove: GrooveObject, selectedChannels?: ChannelKey[], options: ExportOptions = {}) => {
     try {
         const midi = new Midi();
         midi.header.setTempo(groove.bpm || 145);
 
-        ELITE_16_CHANNELS.forEach((channelKey, i) => {
-            if (selectedChannels && selectedChannels.length > 0 && !selectedChannels.includes(channelKey)) return;
-            const rawEvents = (groove as any)[channelKey] as NoteEvent[];
-            if (!rawEvents || rawEvents.length === 0) return;
+        // Time signature + key signature make the file open correctly in a DAW
+        // instead of defaulting to C major / unknown metre.
+        let keySig: { sharps: number; isMinor: boolean } | null = null;
+        try {
+            (midi.header as any).timeSignatures = [{ ticks: 0, timeSignature: [4, 4] }];
+            const parsedKey = getKeySignatureData(groove.key || 'C', groove.scale || 'Minor');
+            if (parsedKey.sharps >= -7 && parsedKey.sharps <= 7) {
+                keySig = parsedKey;
+                (midi.header as any).keySignatures = [{
+                    ticks: 0,
+                    key: theoryEngine.normalizeNote(groove.key || 'C').replace(/\d/g, ''),
+                    scale: parsedKey.isMinor ? 'minor' : 'major',
+                }];
+            }
+        } catch (metaErr) {
+            console.warn('[MIDI Export] skipped optional meta events', metaErr);
+        }
 
-            const track = midi.addTrack();
-            track.name = TRACK_NAMES[channelKey] || channelKey;
-            track.channel = DRUM_KEYS.has(channelKey) ? 9 : i;
+        const active = ELITE_16_CHANNELS.filter((channelKey) => {
+            if (selectedChannels && selectedChannels.length > 0 && !selectedChannels.includes(channelKey)) return false;
+            const events = (groove as any)[channelKey] as NoteEvent[];
+            return !!events && events.length > 0;
+        });
+
+        const channelMap = allocateChannels(active);
+        let written = 0;
+
+        const flatTrack = options.flatten ? midi.addTrack() : null;
+        if (flatTrack) flatTrack.name = asciiSafeName(groove.name).replace(/_/g, ' ');
+
+        active.forEach((channelKey) => {
+            const rawEvents = (groove as any)[channelKey] as NoteEvent[];
+            const track = flatTrack || midi.addTrack();
+            if (!flatTrack) {
+                track.name = TRACK_NAMES[channelKey] || channelKey;
+                track.channel = channelMap.get(channelKey) ?? 0;
+            } else {
+                track.channel = 0;
+            }
 
             rawEvents.forEach((n) => {
-                const name = Array.isArray(n.note) ? n.note[0] : n.note;
-                if (!name) return;
-                const midiNum = theoryEngine.getMidiNote(name);
-                if (!Number.isFinite(midiNum)) return;
-                track.addNote({
-                    midi: midiNum,
-                    ticks: Math.max(0, n.startTick || 0),
-                    durationTicks: Math.max(20, n.durationTicks || 120),
-                    velocity: Math.max(0.2, Math.min(1, n.velocity || 0.8)),
+                const names = Array.isArray(n.note) ? n.note : [n.note];
+                names.forEach((name) => {
+                    if (!name) return;
+                    const midiNum = theoryEngine.getMidiNote(name);
+                    if (!Number.isFinite(midiNum) || midiNum < 0 || midiNum > 127) return;
+                    track.addNote({
+                        midi: Math.round(midiNum),
+                        ticks: Math.max(0, Math.round(n.startTick || 0)),
+                        durationTicks: Math.max(20, Math.round(n.durationTicks || 120)),
+                        velocity: Math.max(0.2, Math.min(1, n.velocity || 0.8)),
+                    });
+                    written++;
                 });
             });
         });
 
-        const safeName = (groove.name || 'MIDI_AI_Track').replace(/[^\w\- ]+/g, '').trim() || 'MIDI_AI_Track';
-        return { bytes: new Uint8Array(midi.toArray()), filename: `${safeName}.mid` };
+        if (written === 0) {
+            console.warn('[MIDI Export] no notes to write');
+            return { bytes: null, filename: 'empty.mid', noteCount: 0 };
+        }
+
+        const bytes = fixKeySignatureBytes(new Uint8Array(midi.toArray()), keySig);
+        return { bytes, filename: `${asciiSafeName(groove.name)}.mid`, noteCount: written };
     } catch (e: any) {
         console.error('MIDI Export Error:', e);
-        return { bytes: null, filename: 'error.mid' };
+        return { bytes: null, filename: 'error.mid', noteCount: 0 };
     }
 };
 
-export const downloadFullArrangementMidi = async (groove: GrooveObject) => {
+/**
+ * Plain-text rendering of the arrangement.
+ * Chat assistants (Gemini, ChatGPT ...) cannot ingest a binary .mid - this is
+ * the format to hand them for analysis.
+ */
+export const exportMidiAsText = (groove: GrooveObject): string => {
+    const bpm = groove.bpm || 145;
+    const ticksPerBeat = INTERNAL_PPQ;
+    const lines: string[] = [];
+    const active = ELITE_16_CHANNELS.filter((ch) => ((groove as any)[ch] || []).length > 0);
+    const total = active.reduce((sum, ch) => sum + ((groove as any)[ch] as NoteEvent[]).length, 0);
+
+    lines.push(`# ${groove.name || 'MIDI AI Track'}`);
+    lines.push(`tempo_bpm: ${bpm}`);
+    lines.push(`key: ${groove.key || '?'} ${groove.scale || ''}`.trim());
+    lines.push(`time_signature: 4/4`);
+    lines.push(`ticks_per_beat: ${ticksPerBeat}`);
+    lines.push(`bars: ${groove.totalBars || 0}`);
+    lines.push(`tracks: ${active.length}`);
+    lines.push(`notes: ${total}`);
+    lines.push('');
+    lines.push('# columns: track,bar,beat,start_tick,length_ticks,note,midi,velocity');
+
+    active.forEach((ch) => {
+        const label = (TRACK_NAMES[ch] || ch).replace(/\s+/g, '_');
+        const events = [...((groove as any)[ch] as NoteEvent[])].sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+        events.forEach((n) => {
+            const names = Array.isArray(n.note) ? n.note : [n.note];
+            names.forEach((name) => {
+                if (!name) return;
+                const tick = Math.round(n.startTick || 0);
+                const bar = Math.floor(tick / TICKS_PER_BAR) + 1;
+                const beat = (tick % TICKS_PER_BAR) / INTERNAL_PPQ + 1;
+                lines.push([
+                    label,
+                    bar,
+                    beat.toFixed(2),
+                    tick,
+                    Math.round(n.durationTicks || 120),
+                    name,
+                    theoryEngine.getMidiNote(name),
+                    Math.round((n.velocity ?? 0.8) * 127),
+                ].join(','));
+            });
+        });
+    });
+
+    return lines.join('\n');
+};
+
+export const downloadMidiAsText = (groove: GrooveObject) => {
+    const text = exportMidiAsText(groove);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${asciiSafeName(groove.name)}_notes.txt`;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url); }, 500);
+};
+
+export const downloadFullArrangementMidi = async (
+    groove: GrooveObject,
+    opts: { report?: boolean; flatten?: boolean } = {}
+) => {
     if (!groove) return;
-    const result = exportMidi(groove);
-    if (!result || !result.bytes) return;
-    const blob = new Blob([result.bytes], { type: "audio/midi" });
+    const result = exportMidi(groove, undefined, { flatten: opts.flatten });
+    if (!result || !result.bytes) {
+        alert('אין תווים לייצוא.');
+        return;
+    }
+    // audio/midi makes some mobile browsers rename the download; octet-stream
+    // keeps the .mid extension exactly as written.
+    const blob = new Blob([result.bytes], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
     link.download = result.filename;
-    document.body.appendChild(link); 
+    document.body.appendChild(link);
     link.click();
     setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url); }, 500);
-    downloadMetadataReport(groove, result.filename.replace('.mid', ''));
+    console.log(`[MIDI] exported ${result.filename} (${result.noteCount} notes, ${result.bytes.length} bytes)`);
+    // The text report is opt-in: a second automatic download confuses phones and
+    // ends up being the file people upload by mistake.
+    if (opts.report) downloadMetadataReport(groove, result.filename.replace('.mid', ''));
 };
 
 export const downloadFullProjectMidi = downloadFullArrangementMidi;

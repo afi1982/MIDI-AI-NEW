@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { jobQueueService, Job } from '../services/jobQueueService';
-import { downloadFullArrangementMidi } from '../services/midiService';
+import { downloadFullArrangementMidi, downloadMidiAsText } from '../services/midiService';
 import { AudioWaveform, ArrowLeft, Loader2, Play, Pause, Download, Microscope, ShieldCheck, Zap, RefreshCw, Star, Layers, Settings2, Clock } from 'lucide-react';
 import { GrooveObject, NoteEvent, MusicGenre, MusicalKey, ScaleType } from '../types';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
@@ -199,7 +199,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             {onOpenInStudio && (
                                 <button onClick={() => onOpenInStudio(activeJob.result)} className="px-3 md:px-4 py-2 md:py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-xs md:text-sm active:scale-95">Studio</button>
                             )}
-                            <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">Export</span></button>
+                            <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">MIDI</span></button>
+                            <button onClick={() => downloadMidiAsText(activeJob.result)} title="קובץ טקסט לניתוח ב-AI (Gemini/ChatGPT)" className="px-3 md:px-4 py-2 md:py-2.5 bg-white/10 hover:bg-white/20 rounded-xl font-bold flex items-center gap-2 transition-all active:scale-95 text-xs md:text-sm">TXT</button>
                         </div>
                     )}
                 </div>

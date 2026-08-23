@@ -5,7 +5,7 @@ import { audioService } from '../services/audioService';
 import { StudioArrangement } from './StudioArrangement';
 import { PianoRollEditor } from './PianoRollEditor';
 import { MidiVisualizer } from './MidiVisualizer';
-import { downloadFullArrangementMidi, importMidiAsGroove } from '../services/midiService';
+import { downloadFullArrangementMidi, downloadMidiAsText, importMidiAsGroove } from '../services/midiService';
 import { midiAcceptFor } from '../services/audioFilePicker';
 import { describeMidiError } from '../services/midiFileService';
 import { ArrowLeft, Play, Pause, Maximize2, Minimize2, Plus, FastForward, Columns, Rows, ZoomIn, ZoomOut, FilePlus, Download } from 'lucide-react';
@@ -212,6 +212,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
                             <input type="file" className="hidden" accept={midiAcceptFor()} onChange={handleImportMidi} />
                         </label>
                         
+                        <button onClick={() => downloadMidiAsText(groove)} title="קובץ טקסט לניתוח ב-AI" className="p-2 md:px-3 md:py-2 bg-white/10 text-white hover:bg-white/20 rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all">
+                            TXT
+                        </button>
                         <button onClick={() => downloadFullArrangementMidi(groove)} className="p-2 md:px-4 md:py-2 bg-white text-black hover:bg-zinc-200 rounded-lg text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all">
                             <Download size={12} />
                         </button>
