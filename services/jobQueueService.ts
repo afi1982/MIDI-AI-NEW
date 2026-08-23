@@ -146,15 +146,14 @@ class JobQueueService {
 
     private async runMidiJob(job: Job) {
         const { params, channels } = job.payload;
-        // 1. Get raw patterns from AI
-        const seed = await generateTranceSequence(params, channels);
-        job.progress = 50; this.notify();
-        
-        // 2. Pass merged params (user choices + AI seed) to Maestro
-        const combinedContext = { ...seed, ...params };
-        
-        let res = await maestroService.generateGroove(combinedContext, params.trackLengthMinutes, channels);
-        job.result = await forensicFixerService.auditAndHeal(res);
+        job.progress = 25; this.notify();
+        const res = await maestroService.generateGroove(params, params.trackLengthMinutes, channels);
+        job.progress = 80; this.notify();
+        try {
+            job.result = await forensicFixerService.auditAndHeal(res);
+        } catch {
+            job.result = res;
+        }
     }
 
     private async runAudioJob(job: Job) {
