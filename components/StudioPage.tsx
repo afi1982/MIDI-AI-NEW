@@ -76,7 +76,9 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     const totalSeconds = (groove.totalBars || 128) * (4 * (60 / currentBpm));
 
     const handleSeek = (time: number) => {
-        setPlaybackTime(time);
+        const t = Math.max(0, Math.min(time, totalSeconds));
+        setPlaybackTime(t);
+        void audioService.seek(t);
     };
 
     const handlePlay = async () => {
