@@ -90,6 +90,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     };
 
     const handlePlay = async () => {
+        audioService.arm();
         if (audioService.isPlaying()) {
             audioService.stop();
             return;
@@ -175,7 +176,7 @@ export const StudioPage: React.FC<StudioPageProps> = ({ initialGroove, onUpdate,
     return (
         <div
             className="flex flex-col h-full bg-[#050507] text-[#E2E8F0] font-sans overflow-hidden select-none"
-            onPointerDown={() => { void audioService.unlock(); }}
+            onPointerDown={() => { audioService.arm(); void audioService.unlock(); }}
         >
             <div className="h-14 md:h-16 shrink-0 bg-[#0A0A0B] border-b border-white/5 flex items-center justify-between px-2 md:px-6 z-[100] shadow-2xl">
                 <div className="flex items-center gap-1 md:gap-4 overflow-hidden">

@@ -1,16 +1,13 @@
 const SILENCE_WAV =
   'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
-/**
- * Unlock Web Audio on phones without starting a second (Tone.js) AudioContext.
- * Two live contexts on Android Chrome steal the speaker and the next Play is silent.
- */
+/** HTML audio ping only — never create a second AudioContext (Tone). */
 export async function unlockAudio(): Promise<boolean> {
   try {
     const ping = new Audio(SILENCE_WAV);
     ping.setAttribute('playsinline', 'true');
     ping.muted = false;
-    ping.volume = 0.01;
+    ping.volume = 0.02;
     await ping.play().catch(() => undefined);
   } catch {}
   return true;

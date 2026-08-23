@@ -58,10 +58,16 @@ export default function App() {
         const stats = getEngineStats();
         setEngineStats(stats);
     }, 2000);
-    const unlock = () => { void unlockAudio(); };
-    window.addEventListener('pointerdown', unlock);
+    const unlock = () => { audioService.arm(); void unlockAudio(); };
+    window.addEventListener('pointerdown', unlock, { capture: true });
+    window.addEventListener('touchstart', unlock, { capture: true });
 
-    return () => { unsub(); clearInterval(interval); window.removeEventListener('pointerdown', unlock); };
+    return () => {
+      unsub();
+      clearInterval(interval);
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('touchstart', unlock, true);
+    };
   }, []);
 
   useEffect(() => {
@@ -71,6 +77,7 @@ export default function App() {
   }, [groove, view]);
 
   const openGrooveInStudio = async (g: GrooveObject) => {
+      audioService.arm();
       setGroove(g);
       setView('STUDIO');
       try { await audioService.playGroove(g, 0); } catch {}

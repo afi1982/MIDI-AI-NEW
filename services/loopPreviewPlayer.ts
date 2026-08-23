@@ -2,7 +2,12 @@ import { ChannelKey, NoteEvent } from '../types';
 import { audioService } from './audioService';
 
 export const loopPreviewPlayer = {
+  arm() {
+    return audioService.arm();
+  },
+
   async unlock() {
+    audioService.arm();
     return audioService.unlock();
   },
 

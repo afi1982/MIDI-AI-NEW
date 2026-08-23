@@ -272,8 +272,8 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
 
                     <div className="grid grid-cols-2 gap-2">
                         <button
-                            onPointerDown={() => { void loopPreviewPlayer.unlock(); }}
-                            onClick={() => { void handlePlayPreview(); }}
+                            onPointerDown={() => { loopPreviewPlayer.arm(); void loopPreviewPlayer.unlock(); }}
+                            onClick={() => { loopPreviewPlayer.arm(); void handlePlayPreview(); }}
                             className={`py-4 rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 ${isPlaying ? 'bg-red-500 text-white' : 'bg-white text-black'}`}
                         >
                             {isPlaying ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
