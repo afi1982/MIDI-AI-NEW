@@ -105,6 +105,9 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
     const [showSettings, setShowSettings] = useState(true);
     const [pickError, setPickError] = useState<string | null>(null);
     const [genre, setGenre] = useState<MusicGenre>(MusicGenre.PSYTRANCE_FULLON);
+    const [mode, setMode] = useState<'MELODY_1_1' | 'FULL_BAND'>('MELODY_1_1');
+    const [gridDiv, setGridDiv] = useState<number>(4);
+    const [snapToKey, setSnapToKey] = useState(false);
     const [keyName, setKeyName] = useState<string>('AUTO');
     const [scaleName, setScaleName] = useState<string>('AUTO');
     const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -137,8 +140,11 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
             genre,
             key: keyName === 'AUTO' ? undefined : keyName,
             scale: scaleName === 'AUTO' ? undefined : scaleName,
+            mode,
+            gridDiv,
+            snapToKey,
         }));
-    }, [autoBpm, manualBpm, genre, keyName, scaleName]);
+    }, [autoBpm, manualBpm, genre, keyName, scaleName, mode, gridDiv, snapToKey]);
 
     const onDrop = useCallback((files: File[]) => {
         if (files.length === 0) return;
@@ -232,7 +238,46 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                                 {autoBpm ? 'AUTO: הקצב יילקח מהשיר המקורי כדי שהמלודיה תתאים.' : `המלודיה נשמרת מהמקור, וההשמעה תהיה ב־${manualBpm} BPM.`}
                             </p>
                         </div>
-                        {showSettings && (
+                        <div className="bg-black/40 p-3 rounded-xl border border-white/10 space-y-3" dir="rtl">
+                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">מה להוציא מהשיר</span>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    onClick={() => setMode('MELODY_1_1')}
+                                    className={`px-3 py-3 rounded-xl text-[11px] font-black transition-all text-right ${mode === 'MELODY_1_1' ? 'bg-blue-600 text-white shadow-glow' : 'bg-white/5 text-gray-400'}`}
+                                >
+                                    מלודיה 1:1
+                                    <span className="block text-[9px] font-bold opacity-70 mt-1">ערוץ אחד בלבד, בדיוק כמו בשיר</span>
+                                </button>
+                                <button
+                                    onClick={() => setMode('FULL_BAND')}
+                                    className={`px-3 py-3 rounded-xl text-[11px] font-black transition-all text-right ${mode === 'FULL_BAND' ? 'bg-blue-600 text-white shadow-glow' : 'bg-white/5 text-gray-400'}`}
+                                >
+                                    הרכב מלא
+                                    <span className="block text-[9px] font-bold opacity-70 mt-1">תופים, בס, אקורדים — 12 ערוצים</span>
+                                </button>
+                            </div>
+                            {mode === 'MELODY_1_1' && (
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <span className="text-[9px] font-black text-gray-500 uppercase">תזמון</span>
+                                    {[{ v: 4, l: 'מדויק (מומלץ)' }, { v: 8, l: 'צמוד יותר' }, { v: 16, l: 'גולמי' }].map((g) => (
+                                        <button
+                                            key={g.v}
+                                            onClick={() => setGridDiv(g.v)}
+                                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${gridDiv === g.v ? 'bg-white text-black' : 'bg-white/5 text-gray-400'}`}
+                                        >{g.l}</button>
+                                    ))}
+                                    <button
+                                        onClick={() => setSnapToKey(!snapToKey)}
+                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${snapToKey ? 'bg-amber-500 text-black' : 'bg-white/5 text-gray-400'}`}
+                                    >תיקון לסולם</button>
+                                    <p className="w-full text-[10px] text-gray-400 leading-relaxed">
+                                        מדויק = רשת 1/16, הכי נקי לעריכה ב-DAW. גולמי = צמוד לפרפורמנס אבל מוסיף תווים קטנים.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {showSettings && mode === 'FULL_BAND' && (
                             <div className="grid grid-cols-3 gap-2">
                                 <label className="bg-black/40 p-3 rounded-xl border border-white/5">
                                     <span className="text-[8px] font-black text-gray-500 uppercase">Style</span>

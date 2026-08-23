@@ -3,7 +3,7 @@ import { theoryEngine } from './theoryEngine';
 import { ELITE_16_CHANNELS } from './maestroService';
 import { optimizationService } from './optimizationService';
 
-export type QualityTool = 'TRACK' | 'LOOP' | 'AUDIO_TO_MIDI' | 'MIDI_TO_AUDIO';
+export type QualityTool = 'TRACK' | 'LOOP' | 'AUDIO_TO_MIDI' | 'MIDI_TO_AUDIO' | 'MELODY_1_1';
 
 export interface QualityCheck {
   id: string;
@@ -44,6 +44,11 @@ function scoreFrom(checks: QualityCheck[]) {
 
 function healGroove(groove: GrooveObject, tool: QualityTool = 'TRACK'): string[] {
   const healed: string[] = [];
+  if (tool === 'MELODY_1_1') {
+    // 1:1 mode - nothing may be invented or moved.
+    healed.push('Preserved the transcribed melody exactly as detected');
+    return healed;
+  }
   if (tool === 'AUDIO_TO_MIDI') {
     healed.push('Kept transcribed melody pitches from the source audio');
     const kick = groove.ch1_kick || [];
@@ -110,6 +115,31 @@ export function inspectAndHealGroove(groove: GrooveObject, tool: QualityTool = '
 
   const counts = Object.fromEntries(ELITE_16_CHANNELS.map((ch) => [ch, ((next as any)[ch] || []).length]));
   const active = ELITE_16_CHANNELS.filter((ch) => counts[ch] > 0);
+
+  if (tool === 'MELODY_1_1') {
+    const melody = (next as any).ch4_leadA as NoteEvent[] || [];
+    let out = 0;
+    let overlaps = 0;
+    melody.forEach((n, i) => {
+      const name = Array.isArray(n.note) ? n.note[0] : n.note;
+      if (!theoryEngine.isNoteInScale(name, key, scale)) out++;
+      const nxt = melody[i + 1];
+      if (nxt && (n.startTick || 0) + (n.durationTicks || 0) > (nxt.startTick || 0)) overlaps++;
+    });
+    const inKey = melody.length ? 1 - out / melody.length : 1;
+    const mChecks: QualityCheck[] = [
+      check('melody', 'Melody transcribed', melody.length >= 8, melody.length ? `${melody.length} notes from the source` : 'No melody found', 'fail'),
+      check('mono', 'Monophonic line', overlaps === 0, overlaps ? `${overlaps} overlapping notes` : 'Single voice, no overlaps', 'fail'),
+      check('single', 'Single channel only', active.length === 1 && counts.ch4_leadA > 0, `${active.length} channel(s) used`, 'fail'),
+      check('key', 'Sits in one key', inKey >= 0.5, `${Math.round(inKey * 100)}% in ${key} ${scale}`, 'warn'),
+      check('length', 'Covers the song', bars >= 4, `${bars} bars`, 'warn'),
+    ];
+    const mScore = scoreFrom(mChecks);
+    return {
+      groove: next,
+      report: { tool, score: mScore, passed: mScore >= 78 && !mChecks.some((c) => !c.passed && c.severity === 'fail'), checks: mChecks, healed },
+    };
+  }
 
   checks.push(check('kick', 'Kick present', counts.ch1_kick > 0, counts.ch1_kick ? `${counts.ch1_kick} hits` : 'Missing kick', 'fail'));
   checks.push(check('sub', 'Sub bass present', counts.ch2_sub > 0, counts.ch2_sub ? `${counts.ch2_sub} notes` : 'Missing sub', tool === 'AUDIO_TO_MIDI' ? 'warn' : 'fail'));

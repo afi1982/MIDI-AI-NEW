@@ -22,6 +22,8 @@ export interface ChordSegment {
 
 export interface AudioStemAnalysis {
   bpm: number;
+  leadFrames?: PitchFrame[];
+  hopSec?: number;
   sourceBpm?: number;
   key: string;
   scale: string;
@@ -512,12 +514,18 @@ function median(xs: number[]) {
   return s[Math.floor(s.length / 2)];
 }
 
-export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
+/**
+ * @param gridDiv subdivisions per beat used for note voting:
+ *   4 = 1/16 (default, DAW friendly), 8 = 1/32 (tight, closest to the source),
+ *   16 = 1/64 (near raw timing).
+ */
+export function framesToNotes(frames: PitchFrame[], bpm: number, gridDiv = 4): NoteEvent[] {
   const voiced = frames.filter((f) => f.voiced && Number.isFinite(f.m));
   if (!voiced.length) return [];
 
   const hop = frames.length > 1 ? Math.max(0.008, frames[1].t - frames[0].t) : 0.012;
-  const sixteenthSec = 60 / bpm / 4;
+  const div = Math.max(1, gridDiv);
+  const sixteenthSec = 60 / bpm / div;
   const framesPerSlot = Math.max(1, sixteenthSec / hop);
 
   /* Per-slot pitch voting.
@@ -578,7 +586,7 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
     if (maxLen > 0) built[i].lenSlots = Math.min(built[i].lenSlots, maxLen);
   }
 
-  const ticksPerSlot = 120; // 1/16 note at 480 PPQ
+  const ticksPerSlot = Math.round(480 / div); // slot length at 480 PPQ
   return built
     .filter((b) => b.lenSlots >= 1)
     .map((b) => ev(b.midi, b.slot * ticksPerSlot, b.lenSlots * ticksPerSlot, b.vel, b.bend));
@@ -1143,6 +1151,8 @@ export async function analyzeBufferToStems(
     scale,
     durationSec,
     lead,
+    leadFrames: melodyFrames,
+    hopSec,
     harmony,
     kickHits,
     hatHits,
@@ -1365,6 +1375,96 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     detectedStems: analysis.detected,
     chordsFound: (analysis.chords || []).length,
     mode: 'multi-channel transcription',
+  };
+  return groove as GrooveObject;
+}
+
+export interface MelodyOnlyOptions {
+  bpm?: number;
+  key?: string;
+  scale?: string;
+  trackName?: string;
+  /** 4 = 1/16 grid (default), 8 = 1/32, 16 = 1/64 (closest to the raw performance) */
+  gridDiv?: number;
+  /** snap out-of-key notes to the detected scale (off by default: 1:1 fidelity) */
+  snapToKey?: boolean;
+}
+
+/**
+ * ONE channel, nothing invented.
+ * Produces a single monophonic melody line that follows the source recording -
+ * no drums, no bass, no chords, no fabricated arrangement.
+ */
+export function arrangeMelodyOnly(analysis: AudioStemAnalysis, options: MelodyOnlyOptions = {}): GrooveObject {
+  const bpm = options.bpm && options.bpm > 40 ? options.bpm : analysis.bpm;
+  const key = options.key || analysis.key;
+  const scale = options.scale || analysis.scale;
+  const gridDiv = options.gridDiv ?? 4;
+
+  // Rebuild the notes at the requested resolution when we still have the frames
+  const sourceBpm = Math.max(80, analysis.sourceBpm || analysis.bpm || bpm);
+  let melody: NoteEvent[] = analysis.leadFrames && analysis.leadFrames.length
+    ? framesToNotes(analysis.leadFrames, sourceBpm, gridDiv)
+    : analysis.lead;
+
+  const tickScale = bpm / sourceBpm;
+  melody = melody
+    .map((n) => ev(
+      theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note),
+      Math.round((n.startTick || 0) * tickScale),
+      Math.max(24, Math.round((n.durationTicks || 120) * tickScale)),
+      Math.min(1, n.velocity || 0.8),
+      n.pitchBend || 0
+    ))
+    .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+
+  // strictly monophonic
+  for (let i = 0; i < melody.length - 1; i++) {
+    const end = (melody[i].startTick || 0) + (melody[i].durationTicks || 0);
+    const nextStart = melody[i + 1].startTick || 0;
+    if (end > nextStart) melody[i].durationTicks = Math.max(24, nextStart - (melody[i].startTick || 0));
+  }
+
+  if (options.snapToKey) {
+    const scaleNotes = new Set(
+      theoryEngine.getScaleNotes(key, scale).map((nn) => theoryEngine.getMidiNote(`${nn}4`) % 12)
+    );
+    if (scaleNotes.size >= 5) {
+      melody = melody.map((n) => {
+        const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+        if (scaleNotes.has(((m % 12) + 12) % 12)) return n;
+        const down = scaleNotes.has((((m - 1) % 12) + 12) % 12);
+        const up = scaleNotes.has((((m + 1) % 12) + 12) % 12);
+        const target = down && !up ? m - 1 : (!down && up ? m + 1 : m);
+        return target === m ? n : ev(target, n.startTick || 0, n.durationTicks || 120, n.velocity || 0.7, 0);
+      });
+    }
+  }
+
+  const lastTick = melody.reduce((mx, n) => Math.max(mx, (n.startTick || 0) + (n.durationTicks || 0)), 0);
+  const audioTicks = Math.round((analysis.durationSec || 0) * bpm * 480 / 60);
+  const totalBars = Math.max(4, Math.ceil(Math.max(lastTick, audioTicks) / 1920));
+
+  const groove: any = {
+    id: `MELODY-${Date.now()}`,
+    name: options.trackName || `Melody · ${key} ${scale}`,
+    bpm,
+    key,
+    scale,
+    totalBars,
+    meta: { architecture: '1:1 melody transcription', sourceBpm, gridDiv },
+  };
+  ELITE_16_CHANNELS.forEach((ch) => { groove[ch] = []; });
+  groove.ch4_leadA = melody;
+
+  groove.analysisMeta = {
+    detectedBpm: analysis.sourceBpm || analysis.bpm,
+    usedBpm: bpm,
+    detectedKey: `${analysis.key} ${analysis.scale}`,
+    usedKey: `${key} ${scale}`,
+    durationSec: analysis.durationSec,
+    channels: { ch4_leadA: melody.length },
+    mode: '1:1 melody',
   };
   return groove as GrooveObject;
 }

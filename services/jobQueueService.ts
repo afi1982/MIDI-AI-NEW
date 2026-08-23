@@ -7,7 +7,7 @@ import { contextBridge } from './contextBridgeService';
 import { midiRendererService, RenderProfile } from './midiRendererService';
 import { inspectAndHealGroove, inspectAudioBlob, QualityReport } from './qualityGateService';
 import { describeAudioPickError } from './audioFilePicker';
-import { analyzeSongToStems, arrangeTranceFromAnalysis, decodeIfAudio } from './audioStemService';
+import { analyzeSongToStems, arrangeTranceFromAnalysis, arrangeMelodyOnly, decodeIfAudio } from './audioStemService';
 
 export type JobType = 'MIDI_GENERATION' | 'AUDIO_REGRESSION' | 'FORENSIC_ANALYSIS' | 'FORENSIC_STUDY' | 'MELODY_ARCHITECT' | 'MIDI_RENDER';
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -41,7 +41,7 @@ class JobQueueService {
         return [...this.jobs];
     }
 
-    public addAudioJob(file: File, overrideBpm?: number, extras?: { genre?: MusicGenre | string; key?: string; scale?: string }) {
+    public addAudioJob(file: File, overrideBpm?: number, extras?: { genre?: MusicGenre | string; key?: string; scale?: string; mode?: 'MELODY_1_1' | 'FULL_BAND'; gridDiv?: number; snapToKey?: boolean }) {
         const pickError = describeAudioPickError(file);
         if (pickError) {
             throw new Error(pickError);
@@ -191,20 +191,35 @@ class JobQueueService {
         job.progress = 86;
         this.notify();
 
-        const groove = arrangeTranceFromAnalysis(analysis, {
-            genre: job.payload.genre || MusicGenre.PSYTRANCE_FULLON,
-            bpm: job.payload.overrideBpm || analysis.bpm,
-            key: job.payload.key || analysis.key,
-            scale: job.payload.scale || analysis.scale,
-            trackName: file.name.replace(/\.[^.]+$/, ''),
-        });
+        const trackName = file.name.replace(/\.[^.]+$/, '');
+        const melodyOnly = (job.payload.mode || 'MELODY_1_1') === 'MELODY_1_1';
+
+        const groove = melodyOnly
+            ? arrangeMelodyOnly(analysis, {
+                bpm: job.payload.overrideBpm || analysis.bpm,
+                key: job.payload.key || analysis.key,
+                scale: job.payload.scale || analysis.scale,
+                trackName,
+                gridDiv: job.payload.gridDiv ?? 4,
+                snapToKey: !!job.payload.snapToKey,
+            })
+            : arrangeTranceFromAnalysis(analysis, {
+                genre: job.payload.genre || MusicGenre.PSYTRANCE_FULLON,
+                bpm: job.payload.overrideBpm || analysis.bpm,
+                key: job.payload.key || analysis.key,
+                scale: job.payload.scale || analysis.scale,
+                trackName,
+            });
 
         job.progress = 94;
         this.notify();
-        const gated = inspectAndHealGroove(groove, 'AUDIO_TO_MIDI');
+        const gated = inspectAndHealGroove(groove, melodyOnly ? 'MELODY_1_1' : 'AUDIO_TO_MIDI');
         job.quality = gated.report;
         job.result = gated.groove;
-        job.name = `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · ${gated.groove.bpm} BPM`;
+        const noteCount = ((gated.groove as any).ch4_leadA || []).length;
+        job.name = melodyOnly
+            ? `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · Melody ${noteCount} notes · ${gated.groove.bpm} BPM`
+            : `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · ${gated.groove.bpm} BPM`;
     }
 
     private async runForensicStudyJob(job: Job) {

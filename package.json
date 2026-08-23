@@ -11,7 +11,8 @@
     "build:docs": "vite build --outDir docs --emptyOutDir",
     "verify:channels": "esbuild scripts/verify-channel-separation.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-channels.mjs --log-level=error && node node_modules/.cache/verify-channels.mjs",
     "verify:melody": "esbuild scripts/verify-melody-in-mix.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-melody.mjs --log-level=error && node node_modules/.cache/verify-melody.mjs",
-    "verify:midi": "esbuild scripts/verify-midi-loader.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-midi.mjs --log-level=error && node node_modules/.cache/verify-midi.mjs"
+    "verify:midi": "esbuild scripts/verify-midi-loader.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-midi.mjs --log-level=error && node node_modules/.cache/verify-midi.mjs",
+    "verify:melody-only": "esbuild scripts/verify-melody-only.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify-melody-only.mjs --log-level=error && node node_modules/.cache/verify-melody-only.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
