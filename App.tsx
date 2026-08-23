@@ -1,19 +1,22 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GrooveObject, GenerationParams, MusicGenre, MusicalKey, ScaleType, EnergyMode, BpmMode, ChannelKey } from './types.ts';
-import { SUPPORTED_CHANNELS, ELITE_16_CHANNELS } from './services/maestroService.ts';
+import { SUPPORTED_CHANNELS } from './services/maestroService.ts';
 import { StudioPage } from './components/StudioPage.tsx';
 import { WelcomeScreen } from './components/WelcomeScreen.tsx';
 import { JobsCenterPage } from './components/JobsCenterPage.tsx';
 import { Navigation } from './components/Navigation.tsx';
+import { MobileTabBar } from './components/MobileTabBar.tsx';
+import { ToolsHub } from './components/ToolsHub.tsx';
+import { InstallPrompt } from './components/InstallPrompt.tsx';
 import { jobQueueService } from './services/jobQueueService';
 import ChannelSelector from './components/ChannelSelector.tsx';
-import { Zap, Lock, Cpu, Database, ShieldCheck, History, RefreshCw, AlertCircle } from 'lucide-react';
+import { Zap, Lock, Database, ShieldCheck } from 'lucide-react';
 import { forensicAuditorService } from './services/forensicAuditorService.ts';
 import { SingleChannelGenerator } from './components/SingleChannelGenerator.tsx';
 import { AudioLab } from './components/AudioLab.tsx';
 import { AudioRenderer } from './components/AudioRenderer.tsx';
-import { getEngineStats, engineProfileService, resolveGenreId } from './services/engineProfileService';
+import { getEngineStats, engineProfileService } from './services/engineProfileService';
 
 const GENRE_BPM_MAP: Record<MusicGenre, number> = {
     [MusicGenre.PSYTRANCE_FULLON]: 145,
@@ -23,15 +26,15 @@ const GENRE_BPM_MAP: Record<MusicGenre, number> = {
     [MusicGenre.TECHNO_PEAK]: 132
 };
 
-type ViewType = 'WELCOME' | 'CREATE' | 'STUDIO' | 'AUDIO_LAB' | 'GENERATOR' | 'JOBS' | 'RENDERER';
+type ViewType = 'WELCOME' | 'CREATE' | 'STUDIO' | 'AUDIO_LAB' | 'GENERATOR' | 'JOBS' | 'RENDERER' | 'TOOLS';
 
-const NAV_ORDER: ViewType[] = ['WELCOME', 'CREATE', 'STUDIO', 'AUDIO_LAB', 'GENERATOR', 'RENDERER', 'JOBS'];
+const NAV_ORDER: ViewType[] = ['WELCOME', 'CREATE', 'STUDIO', 'TOOLS', 'JOBS'];
 
 export default function App() {
   const [view, setView] = useState<ViewType>('WELCOME');
   const [groove, setGroove] = useState<GrooveObject | null>(null);
   const [selectedChannels, setSelectedChannels] = useState<ChannelKey[]>(SUPPORTED_CHANNELS);
-  const [engineStats, setEngineStats] = useState(getEngineStats());
+  const [, setEngineStats] = useState(getEngineStats());
   
   const touchStart = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
@@ -69,11 +72,6 @@ export default function App() {
         forensicAuditorService.observe(groove);
     }
   }, [groove, view]);
-
-  const handleForceSync = () => {
-      engineProfileService.syncEngineWithRecords();
-      setEngineStats(getEngineStats());
-  };
 
   const onTouchStart = (e: React.TouchEvent) => {
     if ((e.target as HTMLElement).closest('[data-no-swipe="true"]')) { touchStart.current = null; return; }
@@ -113,45 +111,47 @@ export default function App() {
       setParams({ ...params, genre: newGenre, bpm: GENRE_BPM_MAP[newGenre] || 140 });
   };
 
-  // Get active engine profile for current selection
-  const currentGenreId = resolveGenreId(params.genre);
-  const currentGenreEngine = engineProfileService.getGenreEngineProfile(currentGenreId);
   const isNeurokinetic = engineProfileService.isNeurokineticActive();
 
+  const hideMobileTabs = view === 'STUDIO';
+
   return (
-    <div className="h-screen w-full bg-black text-white flex flex-col font-sans overflow-hidden select-none" dir="ltr" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+    <div className="app-shell w-full bg-black text-white flex flex-col font-sans overflow-hidden select-none" dir="ltr" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       <Navigation currentView={view} onChangeView={setView} />
       
       {/* Neurokinetic Status Bar */}
-      <div className="bg-[#0A0A0C] border-b border-white/5 px-4 py-1.5 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                  <div className={`w-1.5 h-1.5 rounded-full ${isNeurokinetic ? 'bg-sky-500 animate-pulse' : 'bg-gray-600'}`} />
-                  <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Neurokinetic Drive <span className={isNeurokinetic ? 'text-sky-500' : ''}>{isNeurokinetic ? 'V120 ACTIVE' : 'OFF'}</span></span>
+      <div className="bg-[#0A0A0C] border-b border-white/5 px-3 md:px-4 py-1.5 flex items-center justify-between">
+          <div className="flex items-center gap-3 md:gap-4 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isNeurokinetic ? 'bg-sky-500 animate-pulse' : 'bg-gray-600'}`} />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-gray-400 truncate">Drive <span className={isNeurokinetic ? 'text-sky-500' : ''}>{isNeurokinetic ? 'V120' : 'OFF'}</span></span>
               </div>
-              <div className="h-3 w-[1px] bg-white/10" />
-              <div className="flex items-center gap-2">
+              <div className="h-3 w-[1px] bg-white/10 hidden sm:block" />
+              <div className="hidden sm:flex items-center gap-2">
                   <Database size={10} className="text-gray-500" />
                   <span className="text-[9px] font-bold text-gray-500 uppercase tracking-tighter">Knowledge Base: <span className="text-white">351 Units</span></span>
               </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
               <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/5 border border-white/10">
                   <ShieldCheck size={10} className="text-emerald-500" />
-                  <span className="text-[8px] font-black uppercase text-emerald-500">Hybrid Mode</span>
+                  <span className="text-[8px] font-black uppercase text-emerald-500">Hybrid</span>
               </div>
           </div>
       </div>
 
-      <main className="flex-1 relative overflow-hidden">
+      <main className="flex-1 relative overflow-hidden min-h-0">
         {view === 'WELCOME' && (
             <WelcomeScreen onEnter={() => setView('CREATE')} onOpenStudio={() => setView('STUDIO')} onOpenJobs={() => setView('JOBS')} onOpenGenerator={() => setView('GENERATOR')} onOpenAudioLab={() => setView('AUDIO_LAB')} onOpenRenderer={() => setView('RENDERER')} />
         )}
+        {view === 'TOOLS' && (
+            <ToolsHub onOpenAudioLab={() => setView('AUDIO_LAB')} onOpenRenderer={() => setView('RENDERER')} onOpenGenerator={() => setView('GENERATOR')} />
+        )}
         {view === 'STUDIO' && <StudioPage initialGroove={groove} onUpdate={setGroove} onClose={() => setView('JOBS')} />}
         {view === 'JOBS' && <JobsCenterPage onOpenGroove={handleOpenProjectInReview} onClose={() => setView('WELCOME')} />}
-        {view === 'GENERATOR' && <SingleChannelGenerator onClose={() => setView('WELCOME')} />}
-        {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('WELCOME')} />}
-        {view === 'RENDERER' && <AudioRenderer onClose={() => setView('WELCOME')} />}
+        {view === 'GENERATOR' && <SingleChannelGenerator onClose={() => setView('TOOLS')} />}
+        {view === 'AUDIO_LAB' && <AudioLab onClose={() => setView('TOOLS')} />}
+        {view === 'RENDERER' && <AudioRenderer onClose={() => setView('TOOLS')} />}
 
         {view === 'CREATE' && (
             <div className="h-full flex flex-col items-center p-3 md:p-8 overflow-y-auto custom-scrollbar bg-gradient-to-b from-[#050505] to-black pb-20">
@@ -211,6 +211,8 @@ export default function App() {
             </div>
         )}
       </main>
+      {!hideMobileTabs && <MobileTabBar currentView={view} onChangeView={setView} />}
+      <InstallPrompt />
     </div>
   );
 }

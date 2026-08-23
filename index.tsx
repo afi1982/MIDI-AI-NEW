@@ -1,6 +1,9 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import { registerServiceWorker } from './services/registerSW.ts';
+
+registerServiceWorker();
 
 // --- RUNTIME INTEGRITY CHECK ---
 console.log(`%c SYSTEM BOOT | React Version: ${React.version}`, 'background: #000; color: #00ff00; font-weight: bold; padding: 4px;');

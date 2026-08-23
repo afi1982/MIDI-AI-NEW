@@ -142,15 +142,15 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
     return (
         <div className="h-full flex flex-col bg-[#050508] text-white animate-in fade-in" dir="ltr">
             {audioUrl && <audio ref={audioRef} src={audioUrl} onEnded={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} />}
-            <header className="h-20 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-8 shrink-0">
-                <div className="flex items-center gap-4">
-                    <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full"><ArrowLeft size={20} /></button>
-                    <div className="flex flex-col">
-                        <h1 className="text-xl md:text-2xl font-black uppercase tracking-tighter italic leading-none">Audio to <span className="text-blue-500">MIDI</span></h1>
-                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-[0.2em] mt-1">Convert Audio Files to MIDI V117</p>
+            <header className="h-16 md:h-20 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-3 md:px-8 shrink-0 gap-2">
+                <div className="flex items-center gap-2 md:gap-4 min-w-0">
+                    <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full shrink-0"><ArrowLeft size={20} /></button>
+                    <div className="flex flex-col min-w-0">
+                        <h1 className="text-base md:text-2xl font-black uppercase tracking-tighter italic leading-none truncate">Audio to <span className="text-blue-500">MIDI</span></h1>
+                        <p className="hidden sm:block text-[9px] text-gray-500 font-bold uppercase tracking-[0.2em] mt-1">Convert Audio Files to MIDI V117</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3 shrink-0">
                     <button 
                         onClick={() => setShowSettings(!showSettings)} 
                         className={`p-2 rounded-lg transition-all ${showSettings ? 'bg-blue-500 text-white shadow-glow' : 'bg-white/5 text-gray-400'}`}
@@ -158,9 +158,11 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                     >
                         <Settings2 size={18} />
                     </button>
-                    <SourceExportButton pageKey="AUDIO_LAB" label="Acoustic Logic" />
+                    <div className="hidden md:block">
+                        <SourceExportButton pageKey="AUDIO_LAB" label="Acoustic Logic" />
+                    </div>
                     {activeJob?.status === 'COMPLETED' && (
-                        <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95"><Download size={16} /> Export V117 MIDI</button>
+                        <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">Export</span></button>
                     )}
                 </div>
             </header>
@@ -188,7 +190,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose }) => {
                 </div>
             )}
 
-            <div className="flex-1 p-8 overflow-y-auto custom-scrollbar">
+            <div className="flex-1 p-4 md:p-8 overflow-y-auto custom-scrollbar">
                 {!activeJob ? (
                     <div className="max-w-4xl mx-auto space-y-8">
                         <div {...getRootProps()} className={`w-full h-96 border-2 border-dashed rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] transition-all ${isDragActive ? 'border-blue-500 bg-blue-500/5 shadow-2xl' : 'border-white/10 hover:border-white/20 shadow-xl'}`}>

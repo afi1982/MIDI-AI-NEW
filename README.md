@@ -19,3 +19,18 @@ View your app in AI Studio: https://ai.studio/apps/83ac666f-22b9-4cbe-b476-dcaf4
    `npm run dev`
 
 The Vite server binds to `0.0.0.0:5173` and allows preview hosts, so the UI loads in local and sandboxed environments. The app still boots without an API key; AI generation calls will fail until one is set.
+
+## Install as a mobile app
+
+MIDI AI is a Progressive Web App. On a phone it runs full-screen with a bottom tab bar and can be added to the home screen.
+
+**iPhone / iPad (Safari)**
+1. Open the app URL
+2. Tap Share
+3. Tap **Add to Home Screen**
+
+**Android (Chrome)**
+1. Open the app URL
+2. Tap the install banner, or menu → **Install app** / **Add to Home screen**
+
+After install it opens like a native app (no browser chrome). Use HTTPS in production so the install prompt and service worker work.

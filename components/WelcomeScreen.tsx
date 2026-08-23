@@ -26,19 +26,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   ];
 
   return (
-    <div className="h-full bg-black text-white overflow-y-auto pb-40 font-sans relative custom-scrollbar" dir="ltr">
+    <div className="h-full bg-black text-white overflow-y-auto pb-8 md:pb-40 font-sans relative custom-scrollbar" dir="ltr">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-[-20%] right-[-20%] w-[80vw] h-[80vw] bg-sky-900/10 rounded-full blur-[100px] opacity-30 animate-pulse"></div>
           <div className="absolute bottom-[-20%] left-[-20%] w-[80vw] h-[80vw] bg-purple-900/10 rounded-full blur-[100px] opacity-30"></div>
       </div>
 
-      <div className="relative z-10 flex flex-col items-center px-4 md:px-8 pt-12 max-w-7xl mx-auto">
-          <div className="text-center mb-16 space-y-4">
+      <div className="relative z-10 flex flex-col items-center px-4 md:px-8 pt-6 md:pt-12 max-w-7xl mx-auto">
+          <div className="text-center mb-8 md:mb-16 space-y-3 md:space-y-4">
               <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-[0.2em] text-sky-400 mb-4">
                   <Cpu size={12} />
                   NEUROKINETIC DRIVE V120
               </div>
-              <h1 className="text-5xl md:text-8xl font-black tracking-tighter italic leading-none">
+              <h1 className="text-4xl md:text-8xl font-black tracking-tighter italic leading-none">
                   MIDI <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-fuchsia-500">AI</span>
               </h1>
               <p className="text-sm md:text-lg text-gray-500 font-medium max-w-2xl mx-auto">
