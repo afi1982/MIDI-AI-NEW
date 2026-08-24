@@ -455,7 +455,7 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
   const flush = () => {
     if (!group.length) return;
     const hold = group[group.length - 1].t - group[0].t + hop;
-    if (hold < 0.085 || group.length < 3) { group = []; return; }
+    if (hold < 0.16 || group.length < 4) { group = []; return; }
     const inner = group.slice(Math.floor(group.length * 0.2), Math.max(1, Math.ceil(group.length * 0.8)));
     const pitch = median((inner.length ? inner : group).map((g) => g.m));
     const vel = Math.min(1, group.reduce((a, g) => a + g.v, 0) / group.length);
@@ -547,6 +547,52 @@ export function trackBassYin(samples: Float32Array, sr: number, hop: number, fra
     out.push({ t: i / sr, m: midi, v: Math.min(1, 0.4 + rms * 6), voiced: true });
   }
   return out;
+}
+
+export function trackLeadYin(samples: Float32Array, sr: number, hop: number, frame: number): PitchFrame[] {
+  const out: PitchFrame[] = [];
+  let prev: number | null = null;
+  for (let i = 0; i + frame < samples.length; i += hop) {
+    const win = samples.subarray(i, i + frame);
+    let e = 0;
+    for (let j = 0; j < win.length; j++) e += win[j] * win[j];
+    const rms = Math.sqrt(e / win.length);
+    if (rms < 0.007) { prev = null; out.push({ t: i / sr, m: -1, v: 0, voiced: false }); continue; }
+    const hz = yinHz(win, sr, 190, 1400);
+    if (!hz) { prev = null; out.push({ t: i / sr, m: -1, v: 0, voiced: false }); continue; }
+    let midi = hzToMidi(hz);
+    if (prev != null) {
+      const down = midi - 12;
+      const up = midi + 12;
+      if (down >= LEAD_MIN && Math.abs(down - prev) + 1.1 < Math.abs(midi - prev)) midi = down;
+      else if (up <= LEAD_MAX && Math.abs(up - prev) + 1.1 < Math.abs(midi - prev)) midi = up;
+      if (Math.abs(midi - prev) > 7) { prev = null; out.push({ t: i / sr, m: -1, v: 0, voiced: false }); continue; }
+    }
+    if (midi < LEAD_MIN || midi > LEAD_MAX) { prev = null; continue; }
+    prev = midi;
+    out.push({ t: i / sr, m: midi, v: Math.min(1, 0.35 + rms * 7), voiced: true });
+  }
+  return out;
+}
+
+function fuseMelody(hps: PitchFrame[], yin: PitchFrame[]): PitchFrame[] {
+  if (!hps.length) return yin;
+  if (!yin.length) return hps;
+  return hps.map((h, i) => {
+    const t = h.t;
+    let best: PitchFrame | null = null;
+    let bestD = 1e9;
+    const i0 = Math.max(0, Math.floor((i * yin.length) / hps.length) - 2);
+    for (let j = i0; j < Math.min(yin.length, i0 + 6); j++) {
+      const d = Math.abs(yin[j].t - t);
+      if (d < bestD) { bestD = d; best = yin[j]; }
+    }
+    if (best && best.voiced && bestD < 0.03) {
+      if (!h.voiced) return { ...h, m: best.m, voiced: true, v: Math.max(h.v, best.v) };
+      if (Math.abs(best.m - h.m) < 3.5) return { ...h, m: best.m, voiced: true };
+    }
+    return h;
+  });
 }
 
 function buildKickMask(hits: number[], bpm: number) {
@@ -661,7 +707,10 @@ export async function analyzeBufferToStems(
   const detectedBpm = estimateBpm(fluxForBpm, hop, sr);
   const targetBpm = override?.bpm && override.bpm >= 80 ? override.bpm : detectedBpm;
 
-  const melodyFrames = trackMelodyFromSpectrum(cands, rmsArr, fluxArr, hopSec);
+  const hpsFrames = trackMelodyFromSpectrum(cands, rmsArr, fluxArr, hopSec);
+  const yinBand = rbjLowpass(rbjHighpass(mono, sr, 320), sr, 1800);
+  const yinFrames = trackLeadYin(yinBand, sr, 512, 1024);
+  const melodyFrames = fuseMelody(hpsFrames, yinFrames);
   const lead = framesToNotes(melodyFrames, detectedBpm);
 
   const secondFrames: PitchFrame[] = harmCands.map((cs, i) => {
@@ -797,12 +846,8 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
 
   const lastTick = totalBars * 1920;
   groove.ch4_leadA = analysis.lead.map((n) => place(n, 0.08)).filter((n) => (n.startTick || 0) < lastTick);
-  groove.ch5_leadB = (analysis.harmony || [])
-    .filter((n) => (n.durationTicks || 0) >= 480)
-    .map((n) => place(n))
-    .filter((n) => (n.startTick || 0) < lastTick);
   groove.ch2_sub = analysis.bassNotes
-    .filter((n) => (n.durationTicks || 0) >= 80)
+    .filter((n) => (n.durationTicks || 0) >= 120)
     .map((n) => place(n))
     .filter((n) => (n.startTick || 0) < lastTick);
 
