@@ -3,7 +3,7 @@ import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
 import { QualityReport } from './qualityGateService';
 
-export const ENGINE_BUILD = '2026-08-24-a2m-yin-fuse+style-sync';
+export const ENGINE_BUILD = '2026-08-24-editable-lead-channel';
 
 export type BuildTool = 'TRACK' | 'LOOP' | 'AUDIO_TO_MIDI' | 'STUDIO' | 'OTHER';
 

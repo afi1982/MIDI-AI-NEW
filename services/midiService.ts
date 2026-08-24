@@ -179,6 +179,22 @@ export const downloadFullArrangementMidi = async (groove: GrooveObject) => {
     downloadMetadataReport(groove, result.filename.replace('.mid', ''));
 };
 
+export const downloadLeadOnlyMidi = (groove: GrooveObject) => {
+    if (!groove) return;
+    const result = exportMidi(groove, ['ch4_leadA']);
+    if (!result.bytes) return;
+    const name = `${(groove.name || 'Lead').replace(/[^\w\- ]+/g, '').trim() || 'Lead'}_LEAD_ONLY.mid`;
+    const blob = new Blob([result.bytes], { type: 'audio/midi' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 400);
+    downloadMetadataReport(groove, name.replace('.mid', ''), 'ch4_leadA');
+};
+
 export const downloadFullProjectMidi = downloadFullArrangementMidi;
 
 export const downloadChannelMidi = (groove: GrooveObject, channelKey: ChannelKey) => {

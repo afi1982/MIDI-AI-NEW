@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { jobQueueService, Job } from '../services/jobQueueService';
-import { downloadFullArrangementMidi } from '../services/midiService';
+import { downloadFullArrangementMidi, downloadLeadOnlyMidi } from '../services/midiService';
 import { AudioWaveform, ArrowLeft, Loader2, Play, Pause, Download, Microscope, ShieldCheck, Zap, RefreshCw, Star, Layers, Settings2, Clock } from 'lucide-react';
 import { GrooveObject, NoteEvent, MusicGenre, MusicalKey, ScaleType } from '../types';
 import { ELITE_16_CHANNELS } from '../services/maestroService';
@@ -194,7 +194,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             {onOpenInStudio && (
                                 <button onClick={() => onOpenInStudio(activeJob.result)} className="px-3 md:px-4 py-2 md:py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-xs md:text-sm active:scale-95">Studio</button>
                             )}
-                            <button onClick={() => downloadFullArrangementMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">Export</span></button>
+                            <button onClick={() => downloadLeadOnlyMidi(activeJob.result)} className="px-3 md:px-6 py-2 md:py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold flex items-center gap-2 shadow-glow transition-all active:scale-95 text-xs md:text-sm"><Download size={16} /> <span className="hidden sm:inline">Lead MIDI</span></button>
                         </div>
                     )}
                 </div>
@@ -292,8 +292,8 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Layers className="text-blue-500 mb-3" size={20} />
-                                <h4 className="text-xs font-black uppercase mb-2">מלודיה 1:1</h4>
-                                <p className="text-[10px] text-gray-500 leading-relaxed">מעקב תו־אחר־תו אחרי הליד של השיר. בלי טראנס מומצא ובלי שינוי סולם.</p>
+                                <h4 className="text-xs font-black uppercase mb-2">ערוץ לעריכה</h4>
+                                <p className="text-[10px] text-gray-500 leading-relaxed">ליד מונופוני על הגריד — לא עותק של כל המיקס. אפשר לערוך ב־Cubase.</p>
                             </div>
                             <div className="bg-white/5 border border-white/5 p-5 rounded-3xl">
                                 <Zap className="text-amber-500 mb-3" size={20} />
@@ -356,25 +356,32 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             })}
                         </div>
                         <p className="text-[12px] text-sky-200/90 text-center font-bold" dir="rtl">
-                            זו תמלול 1:1 של המלודיה מהשיר — האזינו ל־LEAD בסטודיו והשוו לשיר המקורי.
+                            זה ערוץ ליד לעריכה ב־Cubase (מונופוני, על הגריד) — לא עותק של כל השיר. בס וקיק בנפרד.
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2">
+                            <button
+                                type="button"
+                                onClick={() => downloadLeadOnlyMidi(activeJob.result)}
+                                className="flex-1 py-4 rounded-2xl bg-blue-600 text-white font-black uppercase text-sm"
+                            >
+                                הורידו רק Lead
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => downloadFullArrangementMidi(activeJob.result)}
+                                className="flex-1 py-4 rounded-2xl bg-white/10 text-white font-black uppercase text-sm"
+                            >
+                                Lead + Bass + Kick
+                            </button>
                             {onOpenInStudio && (
                                 <button
                                     type="button"
                                     onClick={() => onOpenInStudio(activeJob.result)}
                                     className="flex-1 py-4 rounded-2xl bg-emerald-600 text-white font-black uppercase text-sm"
                                 >
-                                    פתחו בסטודיו והשמיעו
+                                    סטודיו
                                 </button>
                             )}
-                            <button
-                                type="button"
-                                onClick={() => { setActiveJob(null); setActiveJobId(null); setIsPlaying(false); }}
-                                className="px-4 py-4 rounded-2xl bg-white/10 text-white font-black uppercase text-sm"
-                            >
-                                שיר חדש
-                            </button>
                         </div>
                         {activeJob.quality && <QualityReportCard report={activeJob.quality} compact />}
                         <BuildReportCard groove={activeJob.result} tool="AUDIO_TO_MIDI" quality={activeJob.quality} extra={{ sourceFile: activeJob.payload?.file?.name }} />

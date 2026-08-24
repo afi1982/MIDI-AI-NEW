@@ -804,6 +804,32 @@ export async function analyzeSongToStems(
   return analysis;
 }
 
+export function toEditableMonophonic(notes: NoteEvent[], bpm: number): NoteEvent[] {
+  const grid = 120;
+  const midiName = (n: NoteEvent) => (Array.isArray(n.note) ? n.note[0] : n.note);
+  const sorted = notes.slice().sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+  const out: NoteEvent[] = [];
+  sorted.forEach((n) => {
+    const start = Math.max(0, Math.round((n.startTick || 0) / grid) * grid);
+    let dur = Math.max(grid, Math.round((n.durationTicks || 240) / grid) * grid);
+    const last = out[out.length - 1];
+    if (last) {
+      const lastStart = last.startTick || 0;
+      if (start <= lastStart) return;
+      const lastEnd = lastStart + (last.durationTicks || 0);
+      if (start < lastEnd) {
+        if (midiName(last) === midiName(n)) {
+          last.durationTicks = Math.max(last.durationTicks || 0, start + dur - lastStart);
+          return;
+        }
+        last.durationTicks = Math.max(grid, start - lastStart - 10);
+      }
+    }
+    out.push(ev(theoryEngine.getMidiNote(midiName(n)), start, dur, n.velocity || 0.85));
+  });
+  return out.filter((n) => (n.durationTicks || 0) >= grid);
+}
+
 export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: ArrangeOptions): GrooveObject {
   const bpm = options.bpm && options.bpm > 40 ? options.bpm : analysis.bpm;
   const key = options.key || analysis.key;
@@ -845,40 +871,30 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   );
 
   const lastTick = totalBars * 1920;
-  groove.ch4_leadA = analysis.lead.map((n) => place(n, 0.08)).filter((n) => (n.startTick || 0) < lastTick);
-  groove.ch2_sub = analysis.bassNotes
-    .filter((n) => (n.durationTicks || 0) >= 120)
-    .map((n) => place(n))
+  groove.ch4_leadA = toEditableMonophonic(analysis.lead.map((n) => place(n, 0.08)), bpm)
     .filter((n) => (n.startTick || 0) < lastTick);
+  groove.ch2_sub = toEditableMonophonic(
+    analysis.bassNotes.filter((n) => (n.durationTicks || 0) >= 120).map((n) => place(n)),
+    bpm
+  ).filter((n) => (n.startTick || 0) < lastTick);
 
+  const kickGrid = 120;
+  const seenKick = new Set<number>();
   analysis.kickHits.forEach((sec) => {
-    const tick = Math.round(sec * bpm * 480 / 60);
-    if (tick < lastTick) groove.ch1_kick.push(ev(36, tick, 140, 1));
+    const tick = Math.round((sec * bpm * 480 / 60) / kickGrid) * kickGrid;
+    if (tick < lastTick && !seenKick.has(tick)) {
+      seenKick.add(tick);
+      groove.ch1_kick.push(ev(36, tick, 140, 1));
+    }
   });
   if (!groove.ch1_kick.length) {
     const mask = analysis.kickMask?.length === 16 ? analysis.kickMask : [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
-    for (let bar = 0; bar < totalBars; bar++) {
+    for (let bar = 0; bar < Math.min(totalBars, 8); bar++) {
       mask.forEach((on, step) => {
         if (on) groove.ch1_kick.push(ev(36, bar * 1920 + step * 120, 140, 1));
       });
     }
   }
-
-  (analysis.snareHits || []).forEach((sec) => {
-    const tick = Math.round(sec * bpm * 480 / 60);
-    if (tick < lastTick) groove.ch8_snare.push(ev(38, tick, 80, 0.78));
-  });
-
-  analysis.hatHits.forEach((sec) => {
-    const tick = Math.round(sec * bpm * 480 / 60);
-    if (tick < lastTick) groove.ch12_hhClosed.push(ev(42, tick, 36, 0.52));
-  });
-
-  const longPads = [...groove.ch5_leadB, ...groove.ch4_leadA.filter((n: NoteEvent) => (n.durationTicks || 0) >= 960)].slice(0, 40);
-  groove.ch15_pad = longPads.map((n: NoteEvent) => {
-    const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-    return ev(m > 70 ? m - 12 : m, n.startTick || 0, Math.max(720, n.durationTicks || 720), 0.24);
-  });
 
   groove.analysisMeta = {
     detectedBpm: analysis.sourceBpm || analysis.bpm,
@@ -886,8 +902,8 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     detectedKey: `${analysis.key} ${analysis.scale}`,
     usedKey: `${key} ${scale}`,
     durationSec: analysis.durationSec,
-    channels: analysis.detected,
-    mode: '1:1 transcription',
+    channels: { ch1_kick: groove.ch1_kick.length, ch2_sub: groove.ch2_sub.length, ch4_leadA: groove.ch4_leadA.length },
+    mode: 'editable channels: lead + bass + kick',
   };
   return groove as GrooveObject;
 }
