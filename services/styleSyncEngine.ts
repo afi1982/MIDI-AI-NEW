@@ -222,22 +222,45 @@ function bassHits(session: GrooveSession, bar: number): Hit[] {
   return out;
 }
 
+function midBassHits(session: GrooveSession, bar: number): Hit[] {
+  const { style, complex } = session;
+  const out: Hit[] = [];
+  const push = (step: number, deg: number, oct: number, dur: number, vel: number) => {
+    if (step < 0 || step > 15 || isKickStep(session, bar, step)) return;
+    out.push({ step, deg, oct, dur, vel });
+  };
+  if (style === 'goa') {
+    for (let s = 1; s < 16; s += 2) push(s, s % 8 === 7 ? 2 : 0, 0, 48, 0.62);
+  } else if (style === 'fullon') {
+    for (let b = 0; b < 4; b++) push(b * 4 + 3, b % 2 ? 2 : 0, 0, 70, 0.68);
+  } else if (style === 'power') {
+    [3, 11].forEach((s) => push(s, 0, 0, 36, 0.8));
+    if (complex && bar === 3) push(15, 4, 0, 30, 0.75);
+  } else if (style === 'melodic') {
+    push(2, 2, 0, 700, 0.55);
+    if (complex) push(10, 4, 0, 500, 0.5);
+  } else {
+    [6, 14].forEach((s) => push(s, 0, 0, 90, 0.6));
+  }
+  return out;
+}
+
 function hatClosedSteps(session: GrooveSession, bar: number): number[] {
   const { style, complex } = session;
   if (style === 'goa') return Array.from({ length: 16 }, (_, i) => i).filter((s) => complex || s % 2 === 0);
-  if (style === 'fullon') return complex ? [0, 2, 4, 6, 8, 10, 12, 14] : [2, 6, 10, 14];
-  if (style === 'power') return complex ? [2, 6, 8, 10, 14] : [6, 14];
-  if (style === 'melodic') return complex ? [2, 6, 10, 14] : [2, 10];
-  return complex ? Array.from({ length: 16 }, (_, i) => i) : [2, 6, 10, 14];
+  if (style === 'fullon') return [2, 6, 10, 14];
+  if (style === 'power') return complex ? [2, 6, 10, 14] : [6, 14];
+  if (style === 'melodic') return [2, 10];
+  return complex ? Array.from({ length: 16 }, (_, i) => i).filter((s) => s % 4 !== 0) : [2, 6, 10, 14];
 }
 
 function openHatSteps(session: GrooveSession, bar: number): number[] {
   const { style, complex } = session;
-  if (style === 'goa') return [2, 6, 10, 14];
-  if (style === 'fullon') return bar % 2 === 0 ? [6, 14] : [2, 10];
-  if (style === 'power') return bar === 3 ? [14, 15] : [14];
-  if (style === 'melodic') return [2, 10];
-  return complex ? [2, 6, 10, 14] : [6, 14];
+  if (style === 'goa') return complex ? [6, 14] : [14];
+  if (style === 'fullon') return bar % 2 === 0 ? [6, 14] : [14];
+  if (style === 'power') return bar === 3 ? [14] : [];
+  if (style === 'melodic') return [10];
+  return complex ? [6, 14] : [14];
 }
 
 function phraseToHits(bars: PhraseNote[][], localBar: number, lift: number, oct: number): Hit[] {
@@ -321,26 +344,27 @@ function acidDegrees(session: GrooveSession, bar: number): number[] {
   const empty = new Array(16).fill(-1);
   if (style === 'goa') {
     return Array.from({ length: 16 }, (_, i) => {
+      if (i % 4 === 0) return -1;
       if (!complex && rng() < 0.2) return -1;
       return (i + bar) % 6;
     });
   }
   if (style === 'power') {
-    return Array.from({ length: 16 }, (_, i) => (i % 4 === 3 ? 4 : i % 2 === 0 ? 0 : -1));
+    return Array.from({ length: 16 }, (_, i) => (i % 4 === 3 ? (i > 8 ? 4 : 0) : -1));
   }
   if (style === 'melodic') {
     const line = empty.slice();
-    [0, 8].forEach((s, i) => { line[s] = i ? 3 : 0; });
-    if (complex) line[4] = 2;
+    line[2] = 0;
+    line[10] = 3;
     return line;
   }
   if (style === 'techno') {
     const line = empty.slice();
-    [2, 6, 10, 14].forEach((s, i) => { line[s] = i === 3 ? 3 : 0; });
-    if (complex) line[11] = 0;
+    [6, 14].forEach((s, i) => { line[s] = i ? 3 : 0; });
+    if (complex && bar % 2 === 1) line[10] = 0;
     return line;
   }
-  const base = [0, -1, 0, 1, 0, -1, 0, 0, 1, -1, 0, 3, 0, -1, 0, 1];
+  const base = [-1, 0, -1, 1, -1, 0, -1, 0, -1, 1, -1, 3, -1, 0, -1, 1];
   const rot = irand(rng, 0, 7);
   return base.map((d, i) => {
     const src = base[(i + rot) % 16];
@@ -355,22 +379,27 @@ function arpHits(session: GrooveSession, bar: number): Hit[] {
   const { style, complex } = session;
   const chord = session.chords[bar % session.chords.length];
   const out: Hit[] = [];
-  if (style === 'power') return out;
-  if (style === 'techno' && !complex) return out;
+  if (style === 'power' || style === 'techno') return out;
   if (style === 'melodic') {
-    const step = complex ? 4 : 8;
-    for (let s = 0; s < 16; s += step) {
-      out.push({ step: s, deg: chord[(s / step) % chord.length], oct: 0, dur: step * TICKS_16 - 30, vel: 0.48 });
+    [0, 8].forEach((s, i) => {
+      out.push({ step: s, deg: chord[i % chord.length], oct: 0, dur: 8 * TICKS_16 - 40, vel: 0.42 });
+    });
+    return out;
+  }
+  if (style === 'fullon') {
+    for (let s = 2; s < 16; s += 2) {
+      out.push({ step: s, deg: chord[(s / 2) % chord.length], oct: bar % 4 === 2 && s >= 12 ? 1 : 0, dur: 140, vel: 0.48 });
     }
     return out;
   }
-  const step = style === 'goa' || (style === 'fullon' && complex) ? 1 : 2;
+  const step = complex ? 1 : 2;
   for (let s = 0; s < 16; s += step) {
+    if (s % 4 === 0) continue;
     out.push({
       step: s,
       deg: chord[(s / step) % chord.length],
-      oct: bar >= 2 && s >= 12 ? 1 : 0,
-      dur: step === 1 ? 60 : 130,
+      oct: bar % 4 === 3 && s >= 12 ? 1 : 0,
+      dur: step === 1 ? 55 : 110,
       vel: 0.46 + s / 40,
     });
   }
@@ -388,16 +417,18 @@ export function writeStyleBar(
   layers: Set<ChannelKey>,
   energy: EnergyLevel
 ) {
+  const style = session.style;
   const kicks = kickSteps(session, bar);
   if (layers.has('ch1_kick')) {
-    kicks.forEach((s) => dest.ch1_kick.push(note(36, bar, s, session.style === 'melodic' ? 200 : 140, s % 4 === 0 ? 1 : 0.88)));
+    const kickDur = style === 'melodic' ? 220 : style === 'power' ? 160 : style === 'techno' ? 120 : style === 'goa' ? 130 : 145;
+    kicks.forEach((s) => dest.ch1_kick.push(note(36, bar, s, kickDur, s % 4 === 0 ? 1 : 0.88)));
   }
 
   if (layers.has('ch2_sub')) {
     bassHits(session, bar).forEach((h) => writeHit(dest.ch2_sub, session, bar, h, 0));
   }
   if (layers.has('ch3_midBass')) {
-    bassHits(session, bar).forEach((h) => writeHit(dest.ch3_midBass, session, bar, { ...h, oct: h.oct }, 12));
+    midBassHits(session, bar).forEach((h) => writeHit(dest.ch3_midBass, session, bar, h, 12));
   }
 
   if (layers.has('ch12_hhClosed') && energy >= EnergyLevel.LOW) {
@@ -409,31 +440,38 @@ export function writeStyleBar(
     openHatSteps(session, bar).forEach((s) => dest.ch13_hhOpen.push(note(46, bar, s, 90, 0.68)));
   }
 
-  const wantBackbeat = session.style === 'techno' || session.style === 'melodic' || session.style === 'power';
-  if (layers.has('ch8_snare') && wantBackbeat && energy >= EnergyLevel.MED) {
-    [4, 12].forEach((s) => dest.ch8_snare.push(note(38, bar, s, 120, 0.92)));
-    if (session.complex && bar % 4 === 3 && session.style === 'techno') {
-      for (let s = 8; s < 16; s += 2) dest.ch8_snare.push(note(38, bar, s, 40, 0.5 + (s - 8) / 20));
+  if (layers.has('ch8_snare') && energy >= EnergyLevel.MED) {
+    if (style === 'techno' || style === 'melodic') {
+      [4, 12].forEach((s) => dest.ch8_snare.push(note(38, bar, s, 120, 0.92)));
+      if (session.complex && bar % 4 === 3 && style === 'techno') {
+        for (let s = 8; s < 16; s += 2) dest.ch8_snare.push(note(38, bar, s, 40, 0.5 + (s - 8) / 20));
+      }
+    } else if (style === 'power' && bar % 4 === 3) {
+      dest.ch8_snare.push(note(38, bar, 12, 80, 0.7));
     }
   }
-  if (layers.has('ch9_clap') && (session.style === 'fullon' || session.style === 'power' || session.style === 'techno') && energy >= EnergyLevel.MED) {
-    [4, 12].forEach((s) => dest.ch9_clap.push(note(39, bar, s, 100, 0.7)));
+  if (layers.has('ch9_clap') && energy >= EnergyLevel.HIGH) {
+    if (style === 'techno') [4, 12].forEach((s) => dest.ch9_clap.push(note(39, bar, s, 100, 0.7)));
+    else if (style === 'power') dest.ch9_clap.push(note(39, bar, 12, 90, 0.65));
   }
 
-  if (layers.has('ch10_percLoop') && energy >= EnergyLevel.MED && session.style !== 'melodic') {
-    const hits = session.style === 'goa' ? [3, 6, 10, 11, 14] : session.style === 'techno' ? [3, 11] : [3, 10, 14];
-    hits.forEach((s, i) => dest.ch10_percLoop.push(note(60 + i, bar, s, 65, 0.55)));
+  if (layers.has('ch10_percLoop') && energy >= EnergyLevel.MED && style !== 'melodic') {
+    const hits = style === 'goa' ? [3, 6, 11, 14] : style === 'techno' ? [3, 11] : style === 'power' ? [3, 14] : [3, 11];
+    hits.forEach((s, i) => dest.ch10_percLoop.push(note(63 + (i % 3), bar, s, 55, 0.48)));
   }
-  if (layers.has('ch11_percTribal') && energy >= EnergyLevel.HIGH && (session.style === 'goa' || session.style === 'fullon')) {
-    [1, 7, 9, 13].forEach((s, i) => dest.ch11_percTribal.push(note(62 + (i % 3), bar, s, 65, 0.5)));
+  if (layers.has('ch11_percTribal') && energy >= EnergyLevel.HIGH && (style === 'goa' || style === 'fullon')) {
+    const hits = style === 'goa' ? [1, 7, 9, 13] : [1, 9];
+    hits.forEach((s, i) => dest.ch11_percTribal.push(note(64 + (i % 2), bar, s, 60, 0.46)));
   }
 
-  if (layers.has('ch15_pad') && session.style !== 'techno') {
+  if (layers.has('ch15_pad')) {
     const chord = session.chords[bar % session.chords.length];
-    const hold = session.style === 'melodic' ? TICKS_BAR - 20 : session.style === 'power' ? 480 : TICKS_BAR - 40;
-    chord.forEach((d, i) => dest.ch15_pad.push(note(degMidi(session, bar, d, 24 + (i === 2 ? 12 : 0)), bar, 0, hold, 0.42 + i * 0.04)));
-  } else if (layers.has('ch15_pad') && session.style === 'techno' && bar % 4 === 0) {
-    dest.ch15_pad.push(note(degMidi(session, bar, 0, 24), bar, 0, 360, 0.35));
+    if (style === 'techno') {
+      if (bar % 8 === 0) dest.ch15_pad.push(note(degMidi(session, bar, 0, 24), bar, 0, 360, 0.3));
+    } else {
+      const hold = style === 'melodic' ? TICKS_BAR - 16 : style === 'power' ? 720 : TICKS_BAR - 30;
+      chord.forEach((d, i) => dest.ch15_pad.push(note(degMidi(session, bar, d, 24 + (i === 2 ? 12 : 0)), bar, 0, hold, 0.38 + i * 0.04)));
+    }
   }
 
   if (layers.has('ch4_leadA') && energy >= EnergyLevel.MED) {
@@ -444,7 +482,7 @@ export function writeStyleBar(
     });
   }
   if (layers.has('ch5_leadB') && energy >= EnergyLevel.HIGH && session.style !== 'techno') {
-    leadHits(session, bar).filter((h) => h.dur >= 240).forEach((h) => {
+    leadHits(session, bar).filter((h) => h.dur >= (style === 'goa' ? 120 : 240)).forEach((h) => {
       const midi = degMidi(session, bar, h.deg + 2, 36 + h.oct * 12);
       dest.ch5_leadB.push(note(midi < 62 ? midi + 12 : midi, bar, h.step, h.dur + 40, h.vel * 0.7));
     });
@@ -466,14 +504,15 @@ export function writeStyleBar(
     });
   }
 
-  if (layers.has('ch16_synth') && (energy >= EnergyLevel.PEAK || (session.style === 'melodic' && energy >= EnergyLevel.HIGH))) {
-    const step = session.style === 'techno' ? 8 : session.style === 'melodic' ? 0 : 4;
-    if (session.style === 'melodic') {
-      dest.ch16_synth.push(note(degMidi(session, bar, 4, 48), bar, 0, TICKS_BAR - 80, 0.4));
-    } else {
-      for (let s = 0; s < 16; s += step || 4) {
-        dest.ch16_synth.push(note(degMidi(session, bar, 0, 48), bar, s, 50, 0.45));
-      }
+  if (layers.has('ch16_synth') && energy >= EnergyLevel.HIGH) {
+    const phraseEnd = bar % 8 === 7 || bar % 8 === 6;
+    if (style === 'melodic' && bar % 4 === 0) {
+      dest.ch16_synth.push(note(degMidi(session, bar, 4, 48), bar, 0, TICKS_BAR - 60, 0.38));
+    } else if (style === 'techno' && phraseEnd) {
+      dest.ch16_synth.push(note(degMidi(session, bar, 0, 48), bar, 12, 280, 0.55));
+    } else if (phraseEnd && (style === 'goa' || style === 'fullon' || style === 'power')) {
+      dest.ch16_synth.push(note(degMidi(session, bar, 7, 48), bar, 8, 800, 0.5));
+      dest.ch16_synth.push(note(degMidi(session, bar, 8, 48), bar, 12, 400, 0.62));
     }
   }
 }

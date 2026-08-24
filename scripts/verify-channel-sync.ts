@@ -58,7 +58,6 @@ if (!track.ch1_kick.length || !track.ch2_sub.length || !track.ch4_leadA.length) 
   throw new Error('Track missing kick/bass/lead');
 }
 
-import { theoryEngine } from '../services/theoryEngine';
 const midiOf = (n: { note: any }) => theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
 for (const g of [MusicGenre.PSYTRANCE_FULLON, MusicGenre.PSYTRANCE_POWER, MusicGenre.GOA_TRANCE]) {
   const lead = composeSeededLoop('ch4_leadA', 'F#', 'Phrygian', g, 'COMPLEX', seed);
