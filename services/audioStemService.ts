@@ -38,10 +38,12 @@ export interface ArrangeOptions {
 const NFFT = 2048;
 const HOP = 256;
 const TARGET_SR = 22050;
-const LEAD_MIN = 55;
+const LEAD_MIN = 58;
 const LEAD_MAX = 88;
 const GRID = 0.25;
 const TOP_K = 6;
+
+const midiOfNote = (n: NoteEvent) => theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
 
 const ev = (midi: number, startTick: number, durationTicks: number, velocity: number, pitchBend = 0): NoteEvent => {
   const bar = Math.floor(startTick / 1920);
@@ -243,6 +245,75 @@ function peakinessOf(cands: { m: number; s: number }[]) {
   const rival = cands.find((c) => Math.abs(c.m - cands[0].m) > 2.4 && Math.abs(Math.abs(c.m - cands[0].m) - 12) > 1.6);
   if (!rival) return 3;
   return cands[0].s / (rival.s + 1e-9);
+}
+
+function isChordFrame(cands: { m: number; s: number }[]) {
+  if (!cands[1]) return false;
+  const a = cands[0];
+  const b = cands[1];
+  const d = Math.abs(a.m - b.m);
+  const iv = Math.min(d % 12, 12 - (d % 12));
+  if (b.s > a.s * 0.64 && iv >= 3 && iv <= 8) return true;
+  if (cands[2] && cands[2].s > a.s * 0.55 && Math.abs(cands[2].m - a.m) > 2.4) return true;
+  return false;
+}
+
+function skylinePick(cands: { m: number; s: number }[], med: number, rms: number, noise: number) {
+  if (!cands[0]) return -1;
+  const peaky = peakinessOf(cands);
+  if (peaky < 1.48) return -1;
+  if (cands[0].s < med * 0.42) return -1;
+  if (rms < noise * 1.55) return -1;
+  if (isChordFrame(cands) && peaky < 1.95) return -1;
+  const floor = cands[0].s * 0.70;
+  let best = cands[0];
+  for (const c of cands) {
+    if (c.s >= floor && c.m > best.m) best = c;
+  }
+  return best.m;
+}
+
+function skylineTrack(cands: { m: number; s: number }[][], rms: number[]) {
+  const scores = cands.map((c) => c[0]?.s || 0);
+  const sorted = scores.slice().sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length * 0.62)] || 1e-8;
+  const rmsSorted = rms.slice().sort((a, b) => a - b);
+  const noise = rmsSorted[Math.floor(rmsSorted.length * 0.25)] || 1e-5;
+  const raw = cands.map((cs, t) => skylinePick(cs, med, rms[t], noise));
+
+  let last = -1;
+  for (let t = 0; t < raw.length; t++) {
+    if (raw[t] < 0) { last = -1; continue; }
+    if (last >= 0) {
+      const down = raw[t] - 12;
+      const up = raw[t] + 12;
+      if (down >= LEAD_MIN && Math.abs(down - last) + 1.1 < Math.abs(raw[t] - last)) raw[t] = down;
+      else if (up <= LEAD_MAX && Math.abs(up - last) + 1.1 < Math.abs(raw[t] - last)) raw[t] = up;
+      if (Math.abs(raw[t] - last) > 8) {
+        raw[t] = -1;
+        last = -1;
+        continue;
+      }
+    }
+    last = raw[t];
+  }
+
+  const sm = raw.slice();
+  for (let t = 2; t < raw.length - 2; t++) {
+    if (raw[t] < 0) continue;
+    const win = [raw[t - 2], raw[t - 1], raw[t], raw[t + 1], raw[t + 2]].filter((x) => x >= 0);
+    if (win.length >= 3) sm[t] = median(win);
+  }
+
+  for (let t = 1; t < sm.length - 1; t++) {
+    if (sm[t] < 0 || sm[t - 1] < 0 || sm[t + 1] < 0) continue;
+    const d1 = sm[t] - sm[t - 1];
+    const d2 = sm[t + 1] - sm[t];
+    if (d1 * d2 > 0 && Math.abs(d1) >= 0.45 && Math.abs(d1) <= 3.2 && Math.abs(d2) >= 0.45 && Math.abs(d2) <= 3.2) {
+      sm[t] = -1;
+    }
+  }
+  return sm;
 }
 
 function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: number[]) {
@@ -455,7 +526,7 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
   const flush = () => {
     if (!group.length) return;
     const hold = group[group.length - 1].t - group[0].t + hop;
-    if (hold < 0.16 || group.length < 4) { group = []; return; }
+    if (hold < 0.20 || group.length < 5) { group = []; return; }
     const inner = group.slice(Math.floor(group.length * 0.2), Math.max(1, Math.ceil(group.length * 0.8)));
     const pitch = median((inner.length ? inner : group).map((g) => g.m));
     const vel = Math.min(1, group.reduce((a, g) => a + g.v, 0) / group.length);
@@ -476,37 +547,108 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
     }
   }
   flush();
-  return stabilizeMelody(notes, bpm);
+  return sculptLead(notes, bpm);
 }
 
 export function stabilizeMelody(notes: NoteEvent[], bpm: number): NoteEvent[] {
   if (!notes.length) return [];
-  const minTicks = Math.round((0.09 * bpm * 480) / 60);
+  const minTicks = Math.round((0.14 * bpm * 480) / 60);
   const sorted = notes.slice().sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
   const merged: NoteEvent[] = [];
   for (const raw of sorted) {
     const n = { ...raw };
     const last = merged[merged.length - 1];
     if (!last) { merged.push(n); continue; }
-    const a = theoryEngine.getMidiNote(Array.isArray(last.note) ? last.note[0] : last.note);
-    const b = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+    const a = midiOfNote(last);
+    const b = midiOfNote(n);
     const lastEnd = (last.startTick || 0) + (last.durationTicks || 0);
     const gap = (n.startTick || 0) - lastEnd;
-    if (Math.abs(a - b) <= 1 && gap < 70) {
+    if (a === b && gap < 90) {
       last.durationTicks = Math.max(last.durationTicks || 0, (n.startTick || 0) + (n.durationTicks || 0) - (last.startTick || 0));
       continue;
     }
     merged.push(n);
   }
-  const kept = merged.filter((n) => (n.durationTicks || 0) >= minTicks);
-  const span = Math.max(1, ((kept[kept.length - 1]?.startTick || 0) + (kept[kept.length - 1]?.durationTicks || 0)) / ((bpm * 480) / 60));
-  const maxNotes = Math.max(10, span * 2.4);
-  if (kept.length <= maxNotes) return kept;
-  return kept
-    .slice()
-    .sort((a, b) => (b.durationTicks || 0) - (a.durationTicks || 0))
-    .slice(0, Math.floor(maxNotes))
-    .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+  return merged.filter((n) => (n.durationTicks || 0) >= minTicks);
+}
+
+export function dropChromaticSweeps(notes: NoteEvent[], bpm: number): NoteEvent[] {
+  if (notes.length < 3) return notes;
+  const shortLim = Math.round((0.22 * bpm * 480) / 60);
+  const drop = new Set<number>();
+  let i = 0;
+  while (i < notes.length) {
+    const run = [i];
+    while (run[run.length - 1] + 1 < notes.length) {
+      const cur = run[run.length - 1];
+      const nxt = cur + 1;
+      const d = midiOfNote(notes[nxt]) - midiOfNote(notes[cur]);
+      const nxtDur = notes[nxt].durationTicks || 0;
+      if (Math.abs(d) >= 1 && Math.abs(d) <= 3 && nxtDur < shortLim * 1.25) run.push(nxt);
+      else break;
+    }
+    if (run.length >= 3) {
+      const deltas: number[] = [];
+      for (let k = 1; k < run.length; k++) deltas.push(midiOfNote(notes[run[k]]) - midiOfNote(notes[run[k - 1]]));
+      const sameSign = deltas.every((d) => d > 0) || deltas.every((d) => d < 0);
+      const allShort = run.every((idx) => (notes[idx].durationTicks || 0) < shortLim * 1.4);
+      const stepped = deltas.every((d) => Math.abs(d) >= 1 && Math.abs(d) <= 3);
+      if (sameSign && allShort && stepped) run.forEach((idx) => drop.add(idx));
+    }
+    i += Math.max(1, run.length - 1);
+  }
+  return notes.filter((_, idx) => !drop.has(idx));
+}
+
+export function sculptLead(notes: NoteEvent[], bpm: number): NoteEvent[] {
+  if (!notes.length) return [];
+  let out = dropChromaticSweeps(stabilizeMelody(notes, bpm), bpm);
+
+  const merged: NoteEvent[] = [];
+  for (const n of out) {
+    const last = merged[merged.length - 1];
+    if (last && midiOfNote(last) === midiOfNote(n)) {
+      const gap = (n.startTick || 0) - ((last.startTick || 0) + (last.durationTicks || 0));
+      if (gap >= 0 && gap <= 160) {
+        last.durationTicks = (n.startTick || 0) + (n.durationTicks || 0) - (last.startTick || 0);
+        last.velocity = Math.max(last.velocity || 0, n.velocity || 0);
+        continue;
+      }
+    }
+    merged.push({ ...n });
+  }
+
+  const minKeep = Math.round((0.20 * bpm * 480) / 60);
+  const longNote = Math.round((0.32 * bpm * 480) / 60);
+  const tiny = Math.round((0.14 * bpm * 480) / 60);
+  const cleaned: NoteEvent[] = [];
+  for (let i = 0; i < merged.length; i++) {
+    const n = merged[i];
+    const dur = n.durationTicks || 0;
+    if (dur < tiny) continue;
+    if (dur >= longNote) { cleaned.push(n); continue; }
+    const prev = merged[i - 1];
+    const next = merged[i + 1];
+    const gapBefore = prev ? (n.startTick || 0) - ((prev.startTick || 0) + (prev.durationTicks || 0)) : 9999;
+    const gapAfter = next ? (next.startTick || 0) - ((n.startTick || 0) + dur) : 9999;
+    if (dur < minKeep && gapBefore > 300 && gapAfter > 300) continue;
+    cleaned.push(n);
+  }
+
+  const longs = cleaned.filter((n) => (n.durationTicks || 0) >= longNote);
+  const lockSrc = longs.length >= 2 ? longs : cleaned;
+  if (lockSrc.length >= 2) {
+    const med = median(lockSrc.map(midiOfNote));
+    return cleaned
+      .map((n) => {
+        let m = midiOfNote(n);
+        while (m > med + 10 && m - 12 >= LEAD_MIN) m -= 12;
+        while (m < med - 10 && m + 12 <= LEAD_MAX) m += 12;
+        return ev(m, n.startTick || 0, n.durationTicks || 120, n.velocity || 0.85, n.pitchBend || 0);
+      })
+      .filter((n) => Math.abs(midiOfNote(n) - med) <= 14);
+  }
+  return cleaned;
 }
 
 export function trackMelodyFromSpectrum(
@@ -515,7 +657,7 @@ export function trackMelodyFromSpectrum(
   flux: number[],
   hopSec: number,
 ): PitchFrame[] {
-  const path = viterbiTrack(cands, rms, flux);
+  const path = skylineTrack(cands, rms);
   return path.map((m, i) => ({
     t: i * hopSec,
     m,
@@ -558,7 +700,7 @@ export function trackLeadYin(samples: Float32Array, sr: number, hop: number, fra
     for (let j = 0; j < win.length; j++) e += win[j] * win[j];
     const rms = Math.sqrt(e / win.length);
     if (rms < 0.007) { prev = null; out.push({ t: i / sr, m: -1, v: 0, voiced: false }); continue; }
-    const hz = yinHz(win, sr, 190, 1400);
+    const hz = yinHz(win, sr, 255, 1650);
     if (!hz) { prev = null; out.push({ t: i / sr, m: -1, v: 0, voiced: false }); continue; }
     let midi = hzToMidi(hz);
     if (prev != null) {
@@ -587,9 +729,10 @@ function fuseMelody(hps: PitchFrame[], yin: PitchFrame[]): PitchFrame[] {
       const d = Math.abs(yin[j].t - t);
       if (d < bestD) { bestD = d; best = yin[j]; }
     }
-    if (best && best.voiced && bestD < 0.03) {
+    if (best && best.voiced && bestD < 0.035 && best.m >= 60) {
       if (!h.voiced) return { ...h, m: best.m, voiced: true, v: Math.max(h.v, best.v) };
-      if (Math.abs(best.m - h.m) < 3.5) return { ...h, m: best.m, voiced: true };
+      if (Math.abs(best.m - h.m) < 4.5) return { ...h, m: best.m * 0.7 + h.m * 0.3, voiced: true };
+      if (best.m > h.m + 2) return { ...h, m: best.m, voiced: true };
     }
     return h;
   });
@@ -635,7 +778,7 @@ export async function analyzeBufferToStems(
   const mono = downsample(slice, sampleRate, sr);
   const durationSec = slice.length / sampleRate;
 
-  const leadSrc = rbjLowpass(rbjHighpass(preEmphasis(mono, 0.93), sr, 260), sr, 3800);
+  const leadSrc = rbjLowpass(rbjHighpass(preEmphasis(mono, 0.93), sr, 290), sr, 3600);
   const low = rbjLowpass(rbjHighpass(mono, sr, 28), sr, 190);
   const high = rbjHighpass(mono, sr, 6200);
   const midBand = rbjLowpass(rbjHighpass(mono, sr, 180), sr, 900);
@@ -676,8 +819,8 @@ export async function analyzeBufferToStems(
     }
     const mixed = new Float32Array(mag.length);
     for (let b = 0; b < mag.length; b++) {
-      const fg = Math.max(0, mag[b] - avgSpec[b] * 0.9);
-      mixed[b] = fg + 0.28 * mag[b];
+      const fg = Math.max(0, mag[b] - avgSpec[b] * 1.08);
+      mixed[b] = fg + 0.07 * mag[b];
     }
     const spec = whiten(mixed);
     const top = topCandidates(spec, nfft, sr, LEAD_MIN, LEAD_MAX, TOP_K);
@@ -708,7 +851,7 @@ export async function analyzeBufferToStems(
   const targetBpm = override?.bpm && override.bpm >= 80 ? override.bpm : detectedBpm;
 
   const hpsFrames = trackMelodyFromSpectrum(cands, rmsArr, fluxArr, hopSec);
-  const yinBand = rbjLowpass(rbjHighpass(mono, sr, 320), sr, 1800);
+  const yinBand = rbjLowpass(rbjHighpass(mono, sr, 270), sr, 2000);
   const yinFrames = trackLeadYin(yinBand, sr, 512, 1024);
   const melodyFrames = fuseMelody(hpsFrames, yinFrames);
   const lead = framesToNotes(melodyFrames, detectedBpm);
@@ -794,7 +937,12 @@ export async function analyzeSongToStems(
         const a = decoded.getChannelData(0);
         const b = decoded.getChannelData(1);
         const m = new Float32Array(a.length);
-        for (let i = 0; i < a.length; i++) m[i] = (a[i] + b[i]) * 0.5;
+        for (let i = 0; i < a.length; i++) {
+          const mid = (a[i] + b[i]) * 0.5;
+          const side = (a[i] - b[i]) * 0.5;
+          const wide = Math.min(1, Math.abs(side) / (Math.abs(mid) + 1e-4));
+          m[i] = mid * (1 - 0.55 * wide);
+        }
         return m;
       })()
     : decoded.getChannelData(0).slice();
@@ -858,7 +1006,7 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
       energy: EnergyLevel.PEAK,
       activeInstruments: [...ELITE_16_CHANNELS],
     }],
-    meta: { architecture: '1:1 source transcription', sourceBpm, leadNotes: analysis.lead.length },
+    meta: { architecture: 'singable monophonic lead', sourceBpm, leadNotes: analysis.lead.length },
   };
   ELITE_16_CHANNELS.forEach((ch) => { groove[ch] = []; });
 
@@ -871,8 +1019,10 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
   );
 
   const lastTick = totalBars * 1920;
-  groove.ch4_leadA = toEditableMonophonic(analysis.lead.map((n) => place(n, 0.08)), bpm)
-    .filter((n) => (n.startTick || 0) < lastTick);
+  groove.ch4_leadA = sculptLead(
+    toEditableMonophonic(analysis.lead.map((n) => place(n, 0.08)), bpm),
+    bpm
+  ).filter((n) => (n.startTick || 0) < lastTick);
   groove.ch2_sub = toEditableMonophonic(
     analysis.bassNotes.filter((n) => (n.durationTicks || 0) >= 120).map((n) => place(n)),
     bpm

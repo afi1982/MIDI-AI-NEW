@@ -1,4 +1,4 @@
-import { analyzeBufferToStems, midiToHz, secToTick } from '../services/audioStemService';
+import { analyzeBufferToStems, dropChromaticSweeps, midiToHz, sculptLead, secToTick } from '../services/audioStemService';
 import { theoryEngine } from '../services/theoryEngine';
 
 function synthMix(sr: number) {
@@ -122,5 +122,33 @@ if (padHits / padMix.expected.length < 0.55) {
   throw new Error(`Pad mix lost the melody (${Math.round((padHits / padMix.expected.length) * 100)}%)`);
 }
 console.log({ padLead: padAnalysis.lead.length, padHits, padPct: Math.round((padHits / padMix.expected.length) * 100) });
+
+const evNote = (midi: number, start: number, dur: number) => ({
+  note: theoryEngine.midiToNote(midi),
+  time: '0:0:0',
+  duration: 'custom' as const,
+  durationTicks: dur,
+  startTick: start,
+  velocity: 0.8,
+});
+const sweep = [60, 61, 62, 63, 64, 65, 66, 67].map((m, i) => evNote(m, 1920 + i * 90, 80));
+const hook = [evNote(72, 0, 720), evNote(71, 800, 640), evNote(67, 1520, 700)];
+const isolated = [evNote(64, 4800, 80), evNote(66, 7200, 90)];
+const cleaned = sculptLead([...hook, ...sweep, ...isolated], 125);
+const cleanedMidi = cleaned.map((n) => midiOf(n.note));
+if (cleaned.some((n) => (n.durationTicks || 0) < 100)) {
+  throw new Error(`sculptLead kept tiny notes: ${cleaned.map((n) => `${n.note}:${n.durationTicks}`).join(',')}`);
+}
+const sweepLeft = dropChromaticSweeps(sweep, 125);
+if (sweepLeft.length > 1) {
+  throw new Error(`chromatic sweep was not dropped (${sweepLeft.length} notes remain)`);
+}
+if (!cleanedMidi.includes(72) || !cleanedMidi.includes(71) || !cleanedMidi.includes(67)) {
+  throw new Error(`sculptLead lost the long hook (${cleanedMidi.join(',')})`);
+}
+if (cleaned.length > 5) {
+  throw new Error(`sculptLead still too busy (${cleaned.length} notes)`);
+}
+console.log({ sculptNotes: cleaned.length, sculptMidi: cleanedMidi, sweepLeft: sweepLeft.length });
 
 console.log('AUDIO-TO-MIDI 1:1 CHECK PASSED');

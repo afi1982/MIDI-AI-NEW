@@ -271,7 +271,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             </div>
                             <h3 className="text-lg font-black uppercase tracking-widest text-white italic text-center">Audio to MIDI</h3>
                             <p className="text-sm text-gray-200 font-medium mt-3 text-center max-w-sm" dir="rtl">
-                                בחרו שיר (MP3 / WAV / M4A). המערכת תתמלל את המלודיה הראשית 1:1 מהמקור — לא קובץ MIDI.
+                                בחרו שיר (MP3 / WAV / M4A). המערכת שולפת רק את קו המלודיה הראשי — תווים ארוכים שאפשר לשיר ולערוך ב־Cubase. לא עותק של כל המיקס.
                             </p>
                             <p className="text-[11px] text-amber-200/90 mt-2 text-center max-w-xs leading-relaxed" dir="rtl">
                                 בסמסונג: אם מסומן «אודיו» תראו רק .mid. לחצו «מסמך» למעלה, או השתמשו בכפתור «כל הקבצים».

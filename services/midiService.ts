@@ -4,8 +4,7 @@ import { GrooveObject, NoteEvent, ChannelKey, ScaleType } from '../types.ts';
 import MidiWriter from 'midi-writer-js'; 
 import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
-import { engineProfileService, getEngineStats } from './engineProfileService';
-import { buildMidiReport, downloadTextReport } from './buildReportService';
+import { buildMidiReport, downloadTextReport, BuildTool } from './buildReportService';
 
 const INTERNAL_PPQ = 480;
 const TICKS_PER_BAR = 1920;
@@ -63,46 +62,20 @@ const sanitizeForWriter = (rawEvents: NoteEvent[], isForensic: boolean): NoteEve
     return sanitized;
 };
 
+const detectTool = (groove: GrooveObject): BuildTool => {
+    const arch = String((groove.meta as any)?.architecture || '');
+    if (arch.includes('singable') || arch.includes('transcription') || arch.includes('editable')) return 'AUDIO_TO_MIDI';
+    if (arch.includes('loop') || arch.includes('Seeded')) return 'LOOP';
+    return 'TRACK';
+};
+
 const downloadMetadataReport = (groove: GrooveObject, fileNameBase: string, specificChannel?: ChannelKey) => {
-    const timestamp = new Date().toLocaleString('he-IL');
-    const safeName = (groove.name || "Untitled").toUpperCase();
-    const bpm = groove.bpm || 140;
-    const genre = groove.genre || "Unknown Genre";
-    const engineStats = getEngineStats();
-
-    let report = `============================================================\n`;
-    report += `   OFFICIAL ENGINE REPORT | MIDI AI V120\n`;
-    report += `============================================================\n\n`;
-    report += `PROJECT IDENTITY:  ${safeName}\n`;
-    report += `GENERATED BPM:     ${bpm}\n`;
-    report += `SCALE/KEY:         ${groove.key} ${groove.scale}\n`;
-    report += `------------------------------------------------------------\n`;
-    report += `⚙️ ENGINE STATUS (EVIDENCE OF SYNTHESIS):\n`;
-    report += `ENGINE CAPACITY:    ${engineStats.total} Units Persisted\n`;
-    
-    if (engineStats.total > 0) {
-        report += `SYNTHESIS STATUS:    ACTIVE\n`;
-        report += `ENGINE OVERRIDE:   ENABLED (Using user-uploaded patterns)\n`;
-        report += `INFLUENCE SOURCE:  Internal Knowledge Base V38\n`;
-        report += `NOTE: This MIDI was created by prioritizing rhythms from your\n`;
-        report += `loaded library over standard factory algorithms.\n`;
-    } else {
-        report += `SYNTHESIS STATUS:    IDLE (No user files loaded yet)\n`;
-    }
-    
-    report += `------------------------------------------------------------\n`;
-    report += `TIMESTAMP:         ${timestamp}\n`;
-    report += `ENGINE NODE:       Maestro V114.5\n`;
-    report += `============================================================\n`;
-
-    const blob = new Blob([report], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${fileNameBase}_INFO_REPORT.txt`;
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url); }, 500);
+    const tool = detectTool(groove);
+    const extra: Record<string, string | number | undefined> = {
+        exportChannel: specificChannel || 'all',
+        exportFile: fileNameBase,
+    };
+    downloadTextReport(buildMidiReport(groove, tool, (groove as any).qaReport, extra), `${fileNameBase}_BUILD_REPORT.txt`);
 };
 
 const TRACK_NAMES: Record<string, string> = {
@@ -183,7 +156,7 @@ export const downloadLeadOnlyMidi = (groove: GrooveObject) => {
     if (!groove) return;
     const result = exportMidi(groove, ['ch4_leadA']);
     if (!result.bytes) return;
-    const name = `${(groove.name || 'Lead').replace(/[^\w\- ]+/g, '').trim() || 'Lead'}_LEAD_ONLY.mid`;
+    const name = `${(groove.name || 'Lead').replace(/[^\w\- ]+/g, '').trim() || 'Lead'}_LEAD_EDITABLE.mid`;
     const blob = new Blob([result.bytes], { type: 'audio/midi' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

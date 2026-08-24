@@ -140,7 +140,12 @@ export function inspectAndHealGroove(groove: GrooveObject, tool: QualityTool = '
   });
   const scalePct = melodicNotes ? 1 - outOfScale / melodicNotes : 1;
   if (tool === 'AUDIO_TO_MIDI') {
-    checks.push(check('lead', 'Melody transcribed', counts.ch4_leadA >= 8, counts.ch4_leadA ? `${counts.ch4_leadA} lead notes from source` : 'No melody found', 'fail'));
+    const leadNotes = next.ch4_leadA || [];
+    const shorts = leadNotes.filter((n) => (n.durationTicks || 0) < 160).length;
+    const dens = leadNotes.length / Math.max(1, bars);
+    checks.push(check('lead', 'Melody transcribed', counts.ch4_leadA >= 6, counts.ch4_leadA ? `${counts.ch4_leadA} lead notes from source` : 'No melody found', 'fail'));
+    checks.push(check('jitter', 'Lead is singable', shorts <= leadNotes.length * 0.28, shorts ? `${shorts}/${leadNotes.length} notes shorter than 160 ticks` : 'No short jitter notes', 'warn'));
+    checks.push(check('density', 'Lead density', dens <= 4.5, `${dens.toFixed(1)} notes/bar`, 'warn'));
     checks.push(check('scale', 'Mostly in key', scalePct >= 0.55, `${Math.round(scalePct * 100)}% in ${key} ${scale}`, 'warn'));
   } else {
     checks.push(check('scale', 'In-scale melody', scalePct >= 0.92, `${Math.round(scalePct * 100)}% in ${key} ${scale}`, 'fail'));

@@ -3,7 +3,7 @@ import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
 import { QualityReport } from './qualityGateService';
 
-export const ENGINE_BUILD = '2026-08-24-editable-lead-channel';
+export const ENGINE_BUILD = '2026-08-24-singable-lead';
 
 export type BuildTool = 'TRACK' | 'LOOP' | 'AUDIO_TO_MIDI' | 'STUDIO' | 'OTHER';
 
@@ -84,6 +84,10 @@ export function buildMidiReport(groove: GrooveObject, tool: BuildTool = 'OTHER',
     lines.push(`a2m.detectedKey: ${groove.analysisMeta.detectedKey ?? '-'}`);
     lines.push(`a2m.mode: ${groove.analysisMeta.mode ?? '-'}`);
     lines.push(`a2m.durationSec: ${groove.analysisMeta.durationSec ?? '-'}`);
+    if ((groove.analysisMeta as any).leadRaw !== undefined) {
+      lines.push(`a2m.leadRaw: ${(groove.analysisMeta as any).leadRaw}`);
+      lines.push(`a2m.leadFinal: ${(groove.analysisMeta as any).leadFinal}`);
+    }
   }
   lines.push('');
   lines.push('CHANNELS');
