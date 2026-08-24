@@ -1,5 +1,6 @@
 import { composeProfessionalTrack } from '../services/trackComposer';
 import { composeSeededLoop, makeSession, bassOnKickCount, emptyDest, writeStyleBar, applyPumpLock, styleOf } from '../services/styleSyncEngine';
+import { theoryEngine } from '../services/theoryEngine';
 import { EnergyLevel, MusicGenre } from '../types';
 
 const styles = [
@@ -55,6 +56,21 @@ if (goa.ch4_leadA.length <= techno.ch4_leadA.length) {
 }
 if (!track.ch1_kick.length || !track.ch2_sub.length || !track.ch4_leadA.length) {
   throw new Error('Track missing kick/bass/lead');
+}
+
+import { theoryEngine } from '../services/theoryEngine';
+const midiOf = (n: { note: any }) => theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+for (const g of [MusicGenre.PSYTRANCE_FULLON, MusicGenre.PSYTRANCE_POWER, MusicGenre.GOA_TRANCE]) {
+  const lead = composeSeededLoop('ch4_leadA', 'F#', 'Phrygian', g, 'COMPLEX', seed);
+  const midis = lead.map(midiOf);
+  const uniq = new Set(midis);
+  const long = lead.filter((n) => (n.durationTicks || 0) >= 240).length;
+  const low = midis.filter((m) => m < 60).length;
+  const span = Math.max(...midis) - Math.min(...midis);
+  if (low > lead.length * 0.15) throw new Error(`${g}: lead sits too low (${low}/${lead.length} below C4)`);
+  if (uniq.size < 5) throw new Error(`${g}: lead has only ${uniq.size} pitches — not a melody`);
+  if (span < 7) throw new Error(`${g}: lead span ${span}st is too small`);
+  if (g !== MusicGenre.GOA_TRANCE && long < 3) throw new Error(`${g}: lead has no held hook notes`);
 }
 
 console.log({

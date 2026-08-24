@@ -69,8 +69,8 @@ const PROGRESSIONS: Record<StyleId, number[][][]> = {
     [[0, 3, 5], [0, 3, 5], [0, 2, 4], [0, 2, 4], [5, 0, 2], [5, 0, 2], [0, 3, 5], [3, 5, 7]],
   ],
   power: [
-    [[0, 4, 0], [0, 4, 0], [0, 4, 1], [0, 4, 0], [1, 4, 0], [1, 4, 0], [0, 4, 0], [4, 0, 4]],
-    [[0, 3, 0], [0, 3, 0], [0, 4, 0], [0, 4, 0], [3, 0, 4], [3, 0, 4], [0, 3, 0], [0, 4, 0]],
+    [[0, 2, 4], [0, 2, 4], [0, 3, 5], [0, 2, 4], [3, 5, 0], [3, 5, 0], [0, 2, 4], [0, 4, 6]],
+    [[0, 3, 5], [0, 3, 5], [0, 2, 4], [0, 2, 4], [1, 4, 6], [1, 4, 6], [0, 3, 5], [3, 5, 7]],
   ],
   melodic: [
     [[0, 2, 4], [0, 2, 4], [5, 0, 2], [5, 0, 2], [3, 5, 0], [3, 5, 0], [4, 6, 1], [0, 2, 4]],
@@ -82,13 +82,52 @@ const PROGRESSIONS: Record<StyleId, number[][][]> = {
   ],
 };
 
-const LEAD_CONTOURS: Record<StyleId, number[][]> = {
-  goa: [[0, 1, 3, 1], [0, 1, 3, 5], [3, 1, 0, 1], [0, 3, 5, 7], [1, 0, 3, 1], [5, 3, 1, 0]],
-  fullon: [[0, 2, 3, 5], [0, 3, 2, 0], [5, 3, 2, 0], [0, 7, 5, 3], [3, 5, 0, 2], [0, 2, 4, 7]],
-  power: [[0, 4, 0, 4], [0, 0, 4, 0], [4, 0, 4, 1], [0, 4, 1, 0]],
-  melodic: [[0, 2, 4, 5], [4, 2, 0, 2], [0, 3, 5, 3], [5, 4, 2, 0], [0, 2, 7, 5]],
-  techno: [[0, 0, 0, 3], [0, -1, 0, -1], [0, 4, 0, 0], [3, 0, 0, 0]],
-};
+type PhraseNote = { step: number; deg: number; dur: number; vel: number; oct?: number };
+
+const PSY_HOOKS: PhraseNote[][][] = [
+  [
+    [{ step: 0, deg: 0, dur: 6, vel: 0.78 }, { step: 6, deg: 2, dur: 2, vel: 0.82 }, { step: 8, deg: 3, dur: 4, vel: 0.88 }, { step: 12, deg: 5, dur: 4, vel: 0.92 }],
+    [{ step: 0, deg: 0, dur: 4, vel: 0.74 }, { step: 4, deg: 3, dur: 4, vel: 0.84 }, { step: 8, deg: 2, dur: 2, vel: 0.76 }, { step: 12, deg: 0, dur: 4, vel: 0.86 }],
+    [{ step: 0, deg: 5, dur: 3, vel: 0.9 }, { step: 4, deg: 7, dur: 4, vel: 0.96 }, { step: 8, deg: 5, dur: 2, vel: 0.86 }, { step: 12, deg: 3, dur: 4, vel: 0.8 }],
+    [{ step: 0, deg: 7, dur: 2, vel: 0.9 }, { step: 3, deg: 5, dur: 2, vel: 0.84 }, { step: 6, deg: 3, dur: 2, vel: 0.78 }, { step: 8, deg: 2, dur: 2, vel: 0.74 }, { step: 12, deg: 0, dur: 4, vel: 0.9 }],
+  ],
+  [
+    [{ step: 0, deg: 0, dur: 8, vel: 0.8 }, { step: 8, deg: 5, dur: 4, vel: 0.88 }, { step: 12, deg: 3, dur: 4, vel: 0.82 }],
+    [{ step: 0, deg: 2, dur: 4, vel: 0.76 }, { step: 4, deg: 3, dur: 4, vel: 0.82 }, { step: 8, deg: 5, dur: 8, vel: 0.9 }],
+    [{ step: 0, deg: 7, dur: 6, vel: 0.94 }, { step: 8, deg: 5, dur: 4, vel: 0.86 }, { step: 12, deg: 3, dur: 4, vel: 0.8 }],
+    [{ step: 0, deg: 5, dur: 2, vel: 0.84 }, { step: 4, deg: 3, dur: 4, vel: 0.8 }, { step: 8, deg: 2, dur: 2, vel: 0.74 }, { step: 12, deg: 0, dur: 4, vel: 0.88 }],
+  ],
+  [
+    [{ step: 2, deg: 0, dur: 4, vel: 0.76 }, { step: 6, deg: 2, dur: 2, vel: 0.8 }, { step: 8, deg: 3, dur: 8, vel: 0.9 }],
+    [{ step: 0, deg: 3, dur: 4, vel: 0.8 }, { step: 4, deg: 5, dur: 4, vel: 0.86 }, { step: 10, deg: 3, dur: 2, vel: 0.78 }, { step: 12, deg: 2, dur: 4, vel: 0.82 }],
+    [{ step: 0, deg: 5, dur: 4, vel: 0.88 }, { step: 4, deg: 7, dur: 4, vel: 0.94 }, { step: 8, deg: 8, dur: 4, vel: 0.96 }, { step: 12, deg: 7, dur: 4, vel: 0.9 }],
+    [{ step: 0, deg: 5, dur: 4, vel: 0.84 }, { step: 6, deg: 3, dur: 2, vel: 0.76 }, { step: 8, deg: 2, dur: 4, vel: 0.74 }, { step: 12, deg: 0, dur: 4, vel: 0.88 }],
+  ],
+];
+
+const POWER_HOOKS: PhraseNote[][][] = [
+  [
+    [{ step: 0, deg: 0, dur: 3, vel: 0.88 }, { step: 4, deg: 2, dur: 3, vel: 0.9 }, { step: 8, deg: 3, dur: 3, vel: 0.86 }, { step: 12, deg: 5, dur: 4, vel: 0.94 }],
+    [{ step: 0, deg: 1, dur: 2, vel: 0.84 }, { step: 4, deg: 7, dur: 4, vel: 0.95 }, { step: 10, deg: 5, dur: 2, vel: 0.86 }, { step: 12, deg: 3, dur: 4, vel: 0.88 }],
+    [{ step: 0, deg: 5, dur: 3, vel: 0.92 }, { step: 4, deg: 7, dur: 3, vel: 0.96 }, { step: 8, deg: 6, dur: 2, vel: 0.88 }, { step: 12, deg: 8, dur: 4, vel: 0.98 }],
+    [{ step: 0, deg: 7, dur: 2, vel: 0.9 }, { step: 4, deg: 5, dur: 2, vel: 0.84 }, { step: 8, deg: 2, dur: 2, vel: 0.8 }, { step: 12, deg: 0, dur: 4, vel: 0.92 }],
+  ],
+  [
+    [{ step: 0, deg: 0, dur: 4, vel: 0.86 }, { step: 6, deg: 2, dur: 2, vel: 0.82 }, { step: 8, deg: 4, dur: 4, vel: 0.9 }, { step: 12, deg: 5, dur: 4, vel: 0.93 }],
+    [{ step: 0, deg: 5, dur: 4, vel: 0.88 }, { step: 4, deg: 3, dur: 4, vel: 0.84 }, { step: 8, deg: 1, dur: 4, vel: 0.8 }, { step: 12, deg: 0, dur: 4, vel: 0.9 }],
+    [{ step: 0, deg: 7, dur: 4, vel: 0.95 }, { step: 6, deg: 5, dur: 2, vel: 0.86 }, { step: 8, deg: 7, dur: 4, vel: 0.94 }, { step: 12, deg: 9, dur: 4, vel: 0.98 }],
+    [{ step: 0, deg: 5, dur: 3, vel: 0.86 }, { step: 4, deg: 3, dur: 3, vel: 0.8 }, { step: 8, deg: 2, dur: 4, vel: 0.78 }, { step: 12, deg: 0, dur: 4, vel: 0.9 }],
+  ],
+];
+
+const GOA_CELLS: number[][] = [
+  [0, 1, 3, 1, 0, 3, 5, 3],
+  [0, 1, 0, 3, 5, 3, 1, 0],
+  [3, 1, 0, 1, 3, 5, 7, 5],
+  [0, 3, 5, 7, 5, 3, 1, 0],
+  [1, 0, 3, 1, 5, 3, 1, 0],
+  [0, 1, 3, 5, 3, 1, 0, 1],
+];
 
 function degMidi(session: GrooveSession, bar: number, deg: number, octaveAdd: number) {
   const chord = session.chords[bar % session.chords.length];
@@ -201,85 +240,79 @@ function openHatSteps(session: GrooveSession, bar: number): number[] {
   return complex ? [2, 6, 10, 14] : [6, 14];
 }
 
+function phraseToHits(bars: PhraseNote[][], localBar: number, lift: number, oct: number): Hit[] {
+  const line = bars[((localBar % bars.length) + bars.length) % bars.length];
+  return line.map((n) => ({
+    step: n.step,
+    deg: n.deg + lift,
+    oct: (n.oct || 0) + oct,
+    dur: Math.max(80, n.dur * TICKS_16 - 16),
+    vel: n.vel,
+  }));
+}
+
 function leadHits(session: GrooveSession, bar: number): Hit[] {
   const { style, complex, seed } = session;
-  const rng = makeRng((seed >>> 0) ^ ((bar + 1) * 7919));
-  const bank = LEAD_CONTOURS[style];
-  const contour = bank[Math.floor(rng() * bank.length)];
-  const out: Hit[] = [];
+  const rng = makeRng((seed >>> 0) ^ 0x51ed);
+  const cycle = Math.floor(bar / 8) % 3;
+  const local = bar % 4;
+  const lift = cycle === 1 ? 2 : 0;
+  const oct = cycle === 2 ? 1 : 0;
 
   if (style === 'goa') {
+    const cell = GOA_CELLS[((seed >>> 0) + local + cycle) % GOA_CELLS.length];
     const n = complex ? 16 : 8;
+    const out: Hit[] = [];
     for (let i = 0; i < n; i++) {
       const step = complex ? i : i * 2;
+      const isAnchor = step % 8 === 0;
       out.push({
         step,
-        deg: contour[i % contour.length] + (bar >= 2 && i >= n / 2 ? 2 : 0),
-        oct: bar >= 2 && i >= 8 ? 1 : 0,
-        dur: complex ? 55 : 90,
-        vel: 0.62 + (i % 4) * 0.06,
+        deg: cell[i % cell.length] + lift + (local === 2 && i >= n / 2 ? 2 : 0),
+        oct: oct + (local === 3 && i >= n / 2 ? 1 : 0),
+        dur: isAnchor ? (complex ? 140 : 200) : complex ? 58 : 90,
+        vel: isAnchor ? 0.9 : 0.62 + (i % 4) * 0.06,
       });
     }
     return out;
   }
 
   if (style === 'techno') {
-    const steps = complex ? [0, 6, bar === 3 ? 12 : 14] : [0];
-    steps.forEach((step, i) => out.push({
+    const degs = [0, 0, 3, 0];
+    const steps = complex ? (local === 3 ? [0, 6, 12] : [0, 6, 14]) : [0];
+    return steps.map((step, i) => ({
       step,
-      deg: contour[i % contour.length],
-      oct: 0,
-      dur: complex ? 90 : 360,
-      vel: 0.8,
+      deg: degs[i % degs.length] + lift,
+      oct,
+      dur: complex ? 160 : 480,
+      vel: 0.82 + i * 0.04,
     }));
-    return out;
   }
 
   if (style === 'melodic') {
+    const degs = [0, 2, 4, 5, 3, 0];
     const parts = complex
-      ? [[0, 8], [8, 8]]
+      ? (local % 2 === 0 ? [[0, 8], [8, 8]] : [[0, 6], [8, 8]])
       : [[0, 16]];
-    parts.forEach(([step, len], i) => out.push({
+    return parts.map(([step, len], i) => ({
       step,
-      deg: contour[(i + bar) % contour.length],
-      oct: bar === 2 ? 1 : 0,
-      dur: len * TICKS_16 - 20,
+      deg: degs[(i + local + cycle) % degs.length] + lift,
+      oct: oct + (local === 2 ? 1 : 0),
+      dur: len * TICKS_16 - 24,
       vel: 0.72 + i * 0.08,
     }));
-    return out;
   }
 
-  if (style === 'power') {
-    const steps = complex ? [0, 4, 8, 12] : [0, 8];
-    steps.forEach((step, i) => out.push({
-      step,
-      deg: contour[i % contour.length],
-      oct: bar === 2 ? 1 : 0,
-      dur: complex ? 80 : 200,
-      vel: 0.88,
-    }));
-    return out;
-  }
-
-  const rhythmBank = complex
-    ? [
-        [[0, 4], [4, 4], [8, 3], [12, 4]],
-        [[0, 3], [4, 4], [8, 2], [11, 5]],
-        [[0, 6], [8, 4], [12, 4]],
-        [[0, 2], [3, 3], [8, 4], [12, 4]],
-        [[2, 4], [8, 4], [14, 2]],
-        [[0, 8], [10, 2], [13, 3]],
-      ]
-    : [[[0, 8], [8, 8]], [[0, 16]], [[0, 4], [8, 8]]];
-  const rhythms = rhythmBank[irand(rng, 0, rhythmBank.length - 1)];
-  const lift = irand(rng, 0, 3);
-  return rhythms.map(([step, len], i) => ({
-    step,
-    deg: contour[(i + bar + lift) % contour.length] + (bar === 2 ? 2 : 0),
-    oct: bar === 2 && rng() > 0.45 ? 1 : 0,
-    dur: len * TICKS_16 - 12,
-    vel: 0.74 + i * 0.04,
+  const bank = style === 'power' ? POWER_HOOKS : PSY_HOOKS;
+  const phrase = bank[(seed >>> 0) % bank.length];
+  const degShift = (seed >>> 5) % 3;
+  const invert = ((seed >>> 8) & 1) === 1;
+  const hits = phraseToHits(phrase, local, lift + degShift, oct).map((h) => ({
+    ...h,
+    deg: invert ? Math.max(0, 7 - (h.deg - lift - degShift)) + lift + degShift : h.deg,
   }));
+  if (!complex) return hits.filter((h, i) => i % 2 === 0 || h.dur >= 360);
+  return hits;
 }
 
 function acidDegrees(session: GrooveSession, bar: number): number[] {
@@ -405,14 +438,15 @@ export function writeStyleBar(
 
   if (layers.has('ch4_leadA') && energy >= EnergyLevel.MED) {
     leadHits(session, bar).forEach((h) => {
-      const register = session.style === 'power' ? 24 : session.style === 'goa' ? 36 : 36;
-      writeHit(dest.ch4_leadA, session, bar, h, register);
+      const midi = degMidi(session, bar, h.deg, 36 + h.oct * 12);
+      const parked = midi < 60 ? midi + 12 : midi > 86 ? midi - 12 : midi;
+      dest.ch4_leadA.push(note(parked, bar, h.step, h.dur, h.vel));
     });
   }
   if (layers.has('ch5_leadB') && energy >= EnergyLevel.HIGH && session.style !== 'techno') {
-    leadHits(session, bar).forEach((h) => {
-      if (h.step % 4 === 0) return;
-      writeHit(dest.ch5_leadB, session, bar, { ...h, deg: h.deg + 2, vel: h.vel * 0.75 }, 36);
+    leadHits(session, bar).filter((h) => h.dur >= 240).forEach((h) => {
+      const midi = degMidi(session, bar, h.deg + 2, 36 + h.oct * 12);
+      dest.ch5_leadB.push(note(midi < 62 ? midi + 12 : midi, bar, h.step, h.dur + 40, h.vel * 0.7));
     });
   }
 
