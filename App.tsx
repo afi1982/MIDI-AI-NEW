@@ -139,7 +139,7 @@ export default function App() {
                     
                     <header className="text-center space-y-2 mb-4 md:mb-8">
                         <h2 className="text-2xl md:text-5xl font-black uppercase tracking-tighter italic">Track <span className="text-sky-500">Generator</span></h2>
-                        <p className="text-gray-500 text-[8px] md:text-[10px] font-mono uppercase tracking-[0.3em]">Select Style & Create</p>
+                        <p className="text-gray-500 text-[8px] md:text-[10px] font-mono uppercase tracking-[0.3em]">Style locks kick · bass · lead · pump</p>
                     </header>
                     
                     <div className="space-y-6 md:space-y-8">
@@ -149,6 +149,13 @@ export default function App() {
                                 <select value={params.genre} onChange={e => handleGenreChange(e.target.value as MusicGenre)} className="w-full bg-transparent font-black text-white outline-none appearance-none cursor-pointer text-base md:text-xl uppercase tracking-tight">
                                     {Object.values(MusicGenre).map(g => <option key={g} value={g} className="bg-black text-white">{g}</option>)}
                                 </select>
+                                <p className="text-[10px] text-gray-400 leading-snug" dir="rtl">
+                                    {params.genre === MusicGenre.GOA_TRANCE ? 'גואה: רול 16, ליד צפוף, אסיד רציף, פאמפ מלא.'
+                                      : params.genre === MusicGenre.PSYTRANCE_POWER ? 'פאוור: קיק אגרסיבי, בס קצר על השורש, ליד נמוך.'
+                                      : params.genre === MusicGenre.MELODIC_TECHNO ? 'מלודיק טכנו: תווים ארוכים, אוף־ביט, פחות צפיפות.'
+                                      : params.genre === MusicGenre.TECHNO_PEAK ? 'טכנו: אוף־ביט, ליד מינימלי, סנר על 2 ו־4.'
+                                      : 'פול־און: גאלופ בס, הוק ליד, פאמפ קלאסי על הקיק.'}
+                                </p>
                             </div>
                             <div className="bg-black p-4 md:p-5 rounded-xl md:rounded-2xl border border-white/5 flex items-center justify-between">
                                 <div>

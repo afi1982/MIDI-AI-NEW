@@ -135,11 +135,14 @@ export class AudioService {
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(160, when);
-    osc.frequency.linearRampToValueAtTime(48, when + 0.1);
-    this.env(g, when, Math.max(0.25, vel) * 0.95, 0.004, 0.22);
+    const startF = this.style === 'techno' ? 210 : this.style === 'goa' ? 175 : this.style === 'power' ? 130 : this.style === 'melodic' ? 118 : 160;
+    const endF = this.style === 'power' ? 40 : this.style === 'melodic' ? 52 : 47;
+    const body = this.style === 'melodic' ? 0.32 : this.style === 'power' ? 0.28 : 0.22;
+    osc.frequency.setValueAtTime(startF, when);
+    osc.frequency.linearRampToValueAtTime(endF, when + (this.style === 'techno' ? 0.07 : 0.1));
+    this.env(g, when, Math.max(0.25, vel) * 0.95, 0.004, body);
     osc.connect(g); g.connect(this.dest());
-    osc.start(when); osc.stop(when + 0.24);
+    osc.start(when); osc.stop(when + body + 0.03);
     this.track(osc);
   }
 
@@ -159,23 +162,28 @@ export class AudioService {
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    osc.type = 'sawtooth';
+    osc.type = this.style === 'power' || this.style === 'techno' ? 'square' : this.style === 'melodic' ? 'sine' : 'sawtooth';
+    const d = this.style === 'goa' ? Math.min(0.09, dur) : this.style === 'melodic' ? Math.max(0.18, dur) : Math.max(0.07, dur * 0.9);
     osc.frequency.setValueAtTime(Math.max(36, freq), when);
-    this.env(g, when, 0.24 * vel, 0.006, Math.max(0.07, dur * 0.9));
+    this.env(g, when, (this.style === 'power' ? 0.3 : 0.24) * vel, 0.006, d);
     osc.connect(g); g.connect(this.dest());
-    osc.start(when); osc.stop(when + Math.max(0.08, dur) + 0.03);
+    osc.start(when); osc.stop(when + d + 0.03);
     this.track(osc);
   }
 
   private fireLead(when: number, freq: number, dur: number, vel: number, twin: boolean) {
     const ctx = this.ctx!;
-    const d = Math.max(0.08, dur);
+    const d = this.style === 'goa' ? Math.min(0.12, Math.max(0.05, dur))
+      : this.style === 'techno' ? Math.min(0.14, Math.max(0.06, dur))
+      : this.style === 'melodic' ? Math.max(0.22, dur)
+      : Math.max(0.08, dur);
     const peak = (twin ? 0.18 : 0.22) * vel;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    osc.type = twin ? 'sawtooth' : 'square';
-    osc.frequency.setValueAtTime(Math.max(80, freq), when);
-    this.env(g, when, peak, 0.01, d);
+    osc.type = this.style === 'goa' ? 'square' : this.style === 'melodic' ? 'triangle' : this.style === 'power' ? 'sawtooth' : twin ? 'sawtooth' : 'square';
+    const f0 = Math.max(80, this.style === 'power' ? freq * 0.75 : freq);
+    osc.frequency.setValueAtTime(f0, when);
+    this.env(g, when, peak, this.style === 'melodic' ? 0.04 : 0.01, d);
     osc.connect(g); g.connect(this.dest());
     osc.start(when); osc.stop(when + d + 0.04);
     this.track(osc);

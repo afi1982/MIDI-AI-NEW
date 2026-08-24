@@ -95,6 +95,17 @@ function healGroove(groove: GrooveObject, tool: QualityTool = 'TRACK'): string[]
     });
   });
 
+  const kickTicks = new Set((groove.ch1_kick || []).map((n) => n.startTick || 0));
+  ['ch2_sub', 'ch3_midBass', 'ch14_acid'].forEach((ch) => {
+    const notes = (groove as any)[ch] as NoteEvent[];
+    if (!notes?.length) return;
+    const next = notes.filter((n) => !kickTicks.has(n.startTick || 0));
+    if (next.length !== notes.length) {
+      (groove as any)[ch] = next;
+      healed.push('Pumped bass/acid off the kick');
+    }
+  });
+
   optimizationService.applyCommand(groove, { operation: 'SYNC_MELODIC_INTERACTION', params: {} });
   healed.push('Cleared kick/bass collisions and note overlaps');
   return [...new Set(healed)];

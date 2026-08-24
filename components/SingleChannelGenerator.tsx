@@ -329,6 +329,13 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                             <select value={genre} onChange={(e) => handleGenreChange(e.target.value as MusicGenre)} className="w-full bg-black border border-emerald-500/30 rounded-lg p-3 text-sm font-bold text-white outline-none">
                                 {Object.values(MusicGenre).map(g => <option key={g} value={g}>{g}</option>)}
                             </select>
+                            <p className="text-[10px] text-gray-400" dir="rtl">
+                                {genre === MusicGenre.GOA_TRANCE ? 'גואה — רול צפוף וליד 16.'
+                                  : genre === MusicGenre.PSYTRANCE_POWER ? 'פאוור — בס קצר וקיק כבד.'
+                                  : genre === MusicGenre.MELODIC_TECHNO ? 'מלודיק — לגיטו ארוך, 126 BPM.'
+                                  : genre === MusicGenre.TECHNO_PEAK ? 'טכנו — אוף־ביט וליד מינימלי.'
+                                  : 'פול־און — גאלופ + הוק + פאמפ.'}
+                            </p>
                         </div>
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Instrument</label>
