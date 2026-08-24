@@ -5,6 +5,7 @@ import { GrooveObject } from '../types';
 import { Activity, CheckCircle, AlertTriangle, Loader2, Download, Trash2, ArrowRight, Zap, Waves, FileAudio } from 'lucide-react';
 import { downloadFullArrangementMidi } from '../services/midiService';
 import { QualityReportCard } from './QualityReportCard';
+import { BuildReportCard } from './BuildReportCard';
 
 interface JobsCenterPageProps {
     onOpenGroove: (groove: GrooveObject) => void;

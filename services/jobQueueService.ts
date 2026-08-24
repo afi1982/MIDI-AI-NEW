@@ -165,6 +165,7 @@ class JobQueueService {
         const res = await maestroService.generateGroove(params, params.trackLengthMinutes, channels);
         job.progress = 70; this.notify();
         const gated = inspectAndHealGroove(res, 'TRACK');
+        gated.groove.qaReport = gated.report;
         job.quality = gated.report;
         job.result = gated.groove;
         job.name = `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · Track`;
@@ -202,6 +203,7 @@ class JobQueueService {
         job.progress = 94;
         this.notify();
         const gated = inspectAndHealGroove(groove, 'AUDIO_TO_MIDI');
+        gated.groove.qaReport = gated.report;
         job.quality = gated.report;
         job.result = gated.groove;
         job.name = `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · ${gated.groove.bpm} BPM`;

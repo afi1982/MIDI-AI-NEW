@@ -300,6 +300,14 @@ export const SingleChannelGenerator: React.FC<SingleChannelGeneratorProps> = ({ 
                     >
                         <Download size={16} /> Download MIDI
                     </button>
+                    {generatedNotes.length > 0 && (
+                        <BuildReportCard
+                            groove={loopAsGroove(generatedNotes, channel, bpm, key, scale, genre)}
+                            tool="LOOP"
+                            quality={quality || undefined}
+                            extra={{ channel, complexity }}
+                        />
+                    )}
 
                     <div className={`border rounded-2xl p-3 ${isEngineEnhanced ? 'bg-purple-600/10 border-purple-500/30' : 'bg-gray-900/50 border-white/5'}`}>
                         <div className="flex items-center gap-3">

@@ -5,6 +5,7 @@ import MidiWriter from 'midi-writer-js';
 import { ELITE_16_CHANNELS } from './maestroService';
 import { theoryEngine } from './theoryEngine';
 import { engineProfileService, getEngineStats } from './engineProfileService';
+import { buildMidiReport, downloadTextReport } from './buildReportService';
 
 const INTERNAL_PPQ = 480;
 const TICKS_PER_BAR = 1920;

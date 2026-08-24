@@ -10,6 +10,7 @@ import { theoryEngine } from '../services/theoryEngine';
 import { SourceExportButton } from './SourceExportButton';
 import { describeAudioPickError, openNativeFilePicker, ALL_FILES_ACCEPT, SONG_ACCEPT } from '../services/audioFilePicker';
 import { QualityReportCard } from './QualityReportCard';
+import { BuildReportCard } from './BuildReportCard';
 
 interface AudioLabProps {
     onClose: () => void;
@@ -376,6 +377,7 @@ export const AudioLab: React.FC<AudioLabProps> = ({ onClose, onOpenInStudio }) =
                             </button>
                         </div>
                         {activeJob.quality && <QualityReportCard report={activeJob.quality} compact />}
+                        <BuildReportCard groove={activeJob.result} tool="AUDIO_TO_MIDI" quality={activeJob.quality} extra={{ sourceFile: activeJob.payload?.file?.name }} />
                         <div className="flex-1 min-h-[180px] md:min-h-[320px] relative rounded-2xl overflow-hidden border border-white/10">
                             <LabPianoRoll groove={activeJob.result} progress={progress} />
                         </div>
