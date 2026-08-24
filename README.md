@@ -24,7 +24,7 @@ The Vite server binds to `0.0.0.0:5173` and allows preview hosts, so the UI load
 
 Open this on the phone (renders the real app, not source code):
 
-https://htmlpreview.github.io/?https://github.com/afi1982/MIDI-AI-NEW/blob/35dbe5e984c86a4323fc3e1e27be28e3ab98bc37/docs/index.html
+https://htmlpreview.github.io/?https://github.com/afi1982/MIDI-AI-NEW/blob/7431f7e071fe88af4358737a81c9db3ceb3ca917/docs/index.html
 
 For a shorter permanent address, enable GitHub Pages:
 Settings → Pages → Deploy from branch `arena/01a02d3b-midi-ai-new` / folder `/docs`
