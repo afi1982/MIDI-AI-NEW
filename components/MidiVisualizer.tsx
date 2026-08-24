@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { NoteEvent, ChannelKey } from '../types';
-import * as Tone from 'tone';
+import { audioService } from '../services/audioService';
 
 interface MidiVisualizerProps {
   groove: any;
@@ -46,8 +46,8 @@ export const MidiVisualizer: React.FC<MidiVisualizerProps> = ({ groove, isPlayin
       
       const w = canvas.width;
       const h = canvas.height;
-      const bpm = Tone.Transport.bpm.value; 
-      const now = Tone.Transport.seconds;
+      const bpm = groove.bpm || 145;
+      const now = audioService.getSeconds();
       
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, w, h);

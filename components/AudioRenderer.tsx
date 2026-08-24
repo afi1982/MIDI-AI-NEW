@@ -1,13 +1,13 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { 
-    Upload, FileAudio, Download, Settings, Loader2, 
-    Music, CheckCircle, ArrowLeft, Layers, ShieldCheck, 
-    Zap, Activity, Info, Clock
+import {
+    Upload, Download, Loader2, Music, CheckCircle, ArrowLeft, Layers, ShieldCheck,
+    Zap, Activity, Play, Pause
 } from 'lucide-react';
-import { midiRendererService, RenderProfile } from '../services/midiRendererService';
+import { RenderProfile } from '../services/midiRendererService';
 import { jobQueueService, Job } from '../services/jobQueueService';
+import { QualityReportCard } from './QualityReportCard';
 
 interface AudioRendererProps {
     onClose: () => void;
@@ -24,6 +24,9 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
     const [selectedProfileId, setSelectedProfileId] = useState('fatboy');
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [activeJob, setActiveJob] = useState<Job | null>(null);
+    const [isPreviewing, setIsPreviewing] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const previewRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
         if (!activeJobId) return;
@@ -43,10 +46,21 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
-        accept: { 'audio/midi': ['.mid', '.midi'] },
+        accept: { 'audio/midi': ['.mid', '.midi'], 'audio/x-midi': ['.mid', '.midi'] },
         maxFiles: 1,
+        multiple: false,
+        useFsAccessApi: false,
         disabled: activeJob?.status === 'PROCESSING'
     } as any);
+
+    useEffect(() => {
+        if (activeJob?.status === 'COMPLETED' && activeJob.result instanceof Blob) {
+            const url = URL.createObjectURL(activeJob.result);
+            setPreviewUrl(url);
+            return () => URL.revokeObjectURL(url);
+        }
+        setPreviewUrl(null);
+    }, [activeJob?.status, activeJob?.result]);
 
     const handleRender = () => {
         if (!file) return;
@@ -61,7 +75,9 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${file?.name.replace(/\.[^/.]+$/, "")}_${selectedProfileId.toUpperCase()}.wav`;
+        const mime = blob.type || activeJob.payload?.mime || '';
+        const ext = mime.includes('mpeg') || mime.includes('mp3') ? 'mp3' : 'wav';
+        a.download = activeJob.payload?.filename || `${file?.name.replace(/\.[^/.]+$/, '')}_${selectedProfileId.toUpperCase()}.${ext}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -76,8 +92,8 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
 
     return (
         <div className="h-full flex flex-col bg-[#050508] text-white animate-in fade-in" dir="ltr">
-            <header className="h-16 md:h-20 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-6 shrink-0 z-50">
-                <div className="flex items-center gap-4">
+            <header className="h-14 md:h-20 bg-[#0A0A0B] border-b border-white/10 flex items-center justify-between px-3 md:px-6 shrink-0 z-50">
+                <div className="flex items-center gap-2 md:gap-4 min-w-0">
                     <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-all text-gray-400 hover:text-white">
                         <ArrowLeft size={20} />
                     </button>
@@ -91,7 +107,7 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
                 <div className="hidden sm:flex items-center gap-4">
                     <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
                         <ShieldCheck size={14} className="text-green-500" />
-                        <span className="text-[10px] font-bold text-gray-400 uppercase">PCM 44.1kHz / 16-bit</span>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase">MP3 192kbps · 44.1kHz</span>
                     </div>
                 </div>
             </header>
@@ -142,15 +158,15 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center text-[10px] font-bold">
                                     <span className="text-gray-500 uppercase">Engine</span>
-                                    <span className="text-fuchsia-400">BACKGROUND_JOB_WORKER</span>
+                                    <span className="text-fuchsia-400">STUDIO MIX 16CH</span>
                                 </div>
                                 <div className="flex justify-between items-center text-[10px] font-bold">
                                     <span className="text-gray-500 uppercase">Mastering</span>
-                                    <span className="text-green-500">DYNAMIC_LIMITER_V2</span>
+                                    <span className="text-green-500">SIDECHAIN + LIMIT</span>
                                 </div>
                                 <div className="flex justify-between items-center text-[10px] font-bold">
-                                    <span className="text-gray-500 uppercase">Sample Rate</span>
-                                    <span className="text-white">44,100 Hz</span>
+                                    <span className="text-gray-500 uppercase">Output</span>
+                                    <span className="text-white">MP3 192 kbps</span>
                                 </div>
                             </div>
                         </div>
@@ -161,18 +177,19 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
                         {!file ? (
                             <div 
                                 {...getRootProps()} 
-                                className={`h-80 md:h-[450px] border-2 border-dashed rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] transition-all group ${
-                                    isDragActive ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-white/10 hover:border-white/20'
+                                className={`min-h-[220px] md:h-[450px] border-2 border-dashed rounded-3xl md:rounded-[3rem] flex flex-col items-center justify-center cursor-pointer bg-[#0A0A0C] px-4 py-8 ${
+                                    isDragActive ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-white/10'
                                 }`}
                             >
                                 <input {...getInputProps()} />
-                                <div className="w-24 h-24 bg-fuchsia-500/10 rounded-full flex items-center justify-center mb-8 border border-fuchsia-500/20 group-hover:scale-110 transition-transform">
-                                    <Upload className="w-10 h-10 text-fuchsia-500" />
+                                <div className="w-16 h-16 md:w-24 md:h-24 bg-fuchsia-500/10 rounded-full flex items-center justify-center mb-4 border border-fuchsia-500/20">
+                                    <Upload className="w-8 h-8 md:w-10 md:h-10 text-fuchsia-500" />
                                 </div>
-                                <h2 className="text-2xl font-black uppercase italic text-white tracking-tighter">Load MIDI Archive</h2>
-                                <p className="text-sm text-gray-500 font-medium mt-2 max-w-xs text-center px-6 leading-relaxed">
-                                    Drop your MIDI session here to trigger a background MP3/WAV conversion.
+                                <h2 className="text-lg md:text-2xl font-black uppercase italic text-white tracking-tighter text-center">Load MIDI</h2>
+                                <p className="text-xs md:text-sm text-gray-200 font-medium mt-2 max-w-xs text-center px-4" dir="rtl">
+                                    בחרו קובץ MIDI מהגנרטור או מהסטודיו. נייצא MP3 באיכות מיקס.
                                 </p>
+                                <span className="mt-4 px-4 py-2 rounded-xl bg-fuchsia-600 text-white text-xs font-black uppercase">Choose file</span>
                             </div>
                         ) : (
                             <div className="bg-[#0A0A0C] border border-white/5 rounded-[3rem] p-8 md:p-16 text-center animate-in zoom-in-95 duration-500 shadow-2xl relative overflow-hidden">
@@ -204,22 +221,48 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
                                         <p className="text-[9px] text-gray-500 font-bold uppercase">You can leave this page; rendering continues in Jobs Center.</p>
                                     </div>
                                 ) : activeJob?.status === 'COMPLETED' ? (
-                                    <div className="space-y-8 animate-in fade-in">
-                                        <div className="flex flex-col items-center gap-3 bg-green-500/10 border border-green-500/30 p-8 rounded-[2.5rem] max-w-sm mx-auto">
-                                            <CheckCircle className="w-12 h-12 text-green-500 mb-2" />
-                                            <span className="text-sm font-black uppercase tracking-[0.2em] text-green-400">Rendering Successful</span>
-                                            <p className="text-[10px] text-gray-500 font-bold uppercase">FILE OPTIMIZED & READY</p>
+                                    <div className="space-y-6 animate-in fade-in">
+                                        <div className="flex flex-col items-center gap-3 bg-green-500/10 border border-green-500/30 p-6 rounded-[2rem] max-w-sm mx-auto">
+                                            <CheckCircle className="w-10 h-10 text-green-500" />
+                                            <span className="text-sm font-black uppercase tracking-[0.2em] text-green-400">MP3 Ready</span>
+                                            <p className="text-[10px] text-gray-400 font-bold uppercase">
+                                                {Math.round(activeJob.payload?.duration || 0)}s · {activeJob.payload?.notes || 0} notes · 192kbps
+                                            </p>
                                         </div>
-                                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                                        {previewUrl && (
+                                            <div className="flex items-center justify-center gap-3">
+                                                <audio
+                                                    ref={previewRef}
+                                                    src={previewUrl}
+                                                    onEnded={() => setIsPreviewing(false)}
+                                                    onPlay={() => setIsPreviewing(true)}
+                                                    onPause={() => setIsPreviewing(false)}
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        const el = previewRef.current;
+                                                        if (!el) return;
+                                                        if (el.paused) void el.play();
+                                                        else el.pause();
+                                                    }}
+                                                    className="px-6 py-3 rounded-2xl bg-fuchsia-600 text-white font-black uppercase text-xs flex items-center gap-2"
+                                                >
+                                                    {isPreviewing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+                                                    {isPreviewing ? 'Stop' : 'Listen'}
+                                                </button>
+                                            </div>
+                                        )}
+                                        {activeJob.quality && <QualityReportCard report={activeJob.quality} compact />}
+                                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
                                             <button 
                                                 onClick={handleDownload}
-                                                className="px-12 py-5 bg-white text-black hover:bg-fuchsia-500 hover:text-white rounded-[1.5rem] font-black text-sm uppercase tracking-widest transition-all shadow-[0_15px_30px_rgba(255,255,255,0.1)] flex items-center justify-center gap-3 active:scale-95"
+                                                className="px-10 py-4 bg-white text-black hover:bg-fuchsia-500 hover:text-white rounded-[1.5rem] font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 active:scale-95"
                                             >
-                                                <Download size={18} /> Export WAV/MP3
+                                                <Download size={18} /> Download MP3
                                             </button>
                                             <button 
                                                 onClick={reset}
-                                                className="px-8 py-5 bg-white/5 hover:bg-white/10 rounded-[1.5rem] font-bold text-xs uppercase tracking-widest transition-all border border-white/10"
+                                                className="px-8 py-4 bg-white/5 hover:bg-white/10 rounded-[1.5rem] font-bold text-xs uppercase tracking-widest border border-white/10"
                                             >
                                                 New Conversion
                                             </button>
@@ -227,8 +270,8 @@ export const AudioRenderer: React.FC<AudioRendererProps> = ({ onClose }) => {
                                     </div>
                                 ) : activeJob?.status === 'FAILED' ? (
                                     <div className="space-y-4">
-                                        <p className="text-red-500 font-bold">Rendering Failed: {activeJob.error}</p>
-                                        <button onClick={reset} className="px-6 py-2 bg-white text-black rounded-lg font-bold uppercase">Try Again</button>
+                                        <p className="text-amber-300 font-bold" dir="rtl">{activeJob.error || 'הרינדור נכשל'}</p>
+                                        <button onClick={() => { setActiveJob(null); setActiveJobId(null); }} className="px-6 py-2 bg-white text-black rounded-lg font-bold uppercase">Try Again</button>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center gap-6">

@@ -1,11 +1,13 @@
 
-import { GrooveObject, GenerationParams, ChannelKey } from '../types';
+import { GrooveObject, GenerationParams, ChannelKey, MusicGenre } from '../types';
 import { generateTranceSequence, deconstructYoutubeLink, generateDivineMelody } from './geminiService';
 import { maestroService, ELITE_16_CHANNELS } from './maestroService.ts';
-import { analyzeAudioChunk, sliceAudio } from './audioAnalysisService';
 import { forensicFixerService } from './forensicFixerService';
 import { contextBridge } from './contextBridgeService';
 import { midiRendererService, RenderProfile } from './midiRendererService';
+import { inspectAndHealGroove, inspectAudioBlob, QualityReport } from './qualityGateService';
+import { describeAudioPickError } from './audioFilePicker';
+import { analyzeSongToStems, arrangeTranceFromAnalysis, decodeIfAudio } from './audioStemService';
 
 export type JobType = 'MIDI_GENERATION' | 'AUDIO_REGRESSION' | 'FORENSIC_ANALYSIS' | 'FORENSIC_STUDY' | 'MELODY_ARCHITECT' | 'MIDI_RENDER';
 export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -20,6 +22,7 @@ export interface Job {
     payload: any;
     result?: any;
     error?: string;
+    quality?: QualityReport;
 }
 
 class JobQueueService {
@@ -38,8 +41,20 @@ class JobQueueService {
         return [...this.jobs];
     }
 
-    public addAudioJob(file: File, overrideBpm?: number) {
-        const job: Job = { id: `AUDIO-${Date.now()}`, type: 'AUDIO_REGRESSION', status: 'PENDING', name: `Audio to MIDI: ${file.name}`, progress: 0, createdAt: Date.now(), payload: { file, overrideBpm } };
+    public addAudioJob(file: File, overrideBpm?: number, extras?: { genre?: MusicGenre | string; key?: string; scale?: string }) {
+        const pickError = describeAudioPickError(file);
+        if (pickError) {
+            throw new Error(pickError);
+        }
+        const job: Job = {
+            id: `AUDIO-${Date.now()}`,
+            type: 'AUDIO_REGRESSION',
+            status: 'PENDING',
+            name: `Audio to MIDI: ${file.name}`,
+            progress: 0,
+            createdAt: Date.now(),
+            payload: { file, overrideBpm, genre: extras?.genre, key: extras?.key, scale: extras?.scale },
+        };
         this.jobs.unshift(job);
         this.notify();
         this.processQueue();
@@ -146,57 +161,52 @@ class JobQueueService {
 
     private async runMidiJob(job: Job) {
         const { params, channels } = job.payload;
-        // 1. Get raw patterns from AI
-        const seed = await generateTranceSequence(params, channels);
-        job.progress = 50; this.notify();
-        
-        // 2. Pass merged params (user choices + AI seed) to Maestro
-        const combinedContext = { ...seed, ...params };
-        
-        let res = await maestroService.generateGroove(combinedContext, params.trackLengthMinutes, channels);
-        job.result = await forensicFixerService.auditAndHeal(res);
+        job.progress = 25; this.notify();
+        const res = await maestroService.generateGroove(params, params.trackLengthMinutes, channels);
+        job.progress = 70; this.notify();
+        const gated = inspectAndHealGroove(res, 'TRACK');
+        gated.groove.qaReport = gated.report;
+        job.quality = gated.report;
+        job.result = gated.groove;
+        job.name = `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · Track`;
     }
 
     private async runAudioJob(job: Job) {
-        const CHUNK_LEN = 12; 
-        
-        // Phase 1: Slicing (0-30%)
-        const slices = await sliceAudio(job.payload.file, CHUNK_LEN, (p) => {
-            job.progress = p;
-            this.notify();
-        });
-
-        const segments: GrooveObject[] = new Array(slices.length);
-        
-        // Phase 2: Analysis (30-100%)
-        const batchSize = 3; 
-        for (let i = 0; i < slices.length; i += batchSize) {
-            const batch = slices.slice(i, i + batchSize).map((slice, idx) => {
-                const realIdx = i + idx;
-                return analyzeAudioChunk(slice.blob, realIdx, CHUNK_LEN, slice.isSilent, job.payload.overrideBpm).then(res => {
-                    segments[realIdx] = res;
-                    const completed = segments.filter(s => !!s).length;
-                    // Map 0-100% of analysis to 30-100% of total progress
-                    const analysisProgress = (completed / slices.length) * 70;
-                    job.progress = Math.round(30 + analysisProgress);
-                    this.notify();
-                }).catch(err => {
-                    console.error(`Batch error at index ${realIdx}:`, err);
-                    segments[realIdx] = { id: `ERR-${realIdx}`, bpm: job.payload.overrideBpm || 140, key: "C", scale: "Chromatic", totalBars: 4 } as any;
-                    const completed = segments.filter(s => !!s).length;
-                    const analysisProgress = (completed / slices.length) * 70;
-                    job.progress = Math.round(30 + analysisProgress);
-                    this.notify();
-                });
-            });
-            await Promise.all(batch);
+        const file = job.payload.file as File;
+        const ok = await decodeIfAudio(file);
+        if (!ok) {
+            throw new Error('לא הצלחנו לקרוא את הקובץ כשמע. בחרו MP3, WAV, M4A או AAC — לא MIDI.');
         }
+        job.progress = 12;
+        this.notify();
 
-        const master: any = { ...segments[0], id: `RECON-${Date.now()}`, totalBars: segments.reduce((s, seg) => s + (seg.totalBars || 0), 0) };
-        ELITE_16_CHANNELS.forEach(ch => {
-            (master as any)[ch] = segments.flatMap(seg => (seg as any)[ch] || []);
+        const analysis = await analyzeSongToStems(file, (p) => {
+            job.progress = Math.min(80, p);
+            this.notify();
+        }, {
+            bpm: job.payload.overrideBpm,
+            key: job.payload.key,
+            scale: job.payload.scale,
         });
-        job.result = master;
+
+        job.progress = 86;
+        this.notify();
+
+        const groove = arrangeTranceFromAnalysis(analysis, {
+            genre: job.payload.genre || MusicGenre.PSYTRANCE_FULLON,
+            bpm: job.payload.overrideBpm || analysis.bpm,
+            key: job.payload.key || analysis.key,
+            scale: job.payload.scale || analysis.scale,
+            trackName: file.name.replace(/\.[^.]+$/, ''),
+        });
+
+        job.progress = 94;
+        this.notify();
+        const gated = inspectAndHealGroove(groove, 'AUDIO_TO_MIDI');
+        gated.groove.qaReport = gated.report;
+        job.quality = gated.report;
+        job.result = gated.groove;
+        job.name = `${gated.report.passed ? 'QA PASS' : 'QA FIX'} ${gated.report.score} · ${gated.groove.bpm} BPM`;
     }
 
     private async runForensicStudyJob(job: Job) {
@@ -234,11 +244,14 @@ class JobQueueService {
 
     private async runRenderJob(job: Job) {
         const { file, profile } = job.payload;
-        const blob = await midiRendererService.renderToWav(file, profile, (p) => {
-            job.progress = Math.round(p);
+        const rendered = await midiRendererService.renderToAudio(file, profile, (p) => {
+            job.progress = Math.min(96, Math.round(p));
             this.notify();
         });
-        job.result = blob;
+        job.quality = rendered.quality || await inspectAudioBlob(rendered.wav || rendered.blob);
+        job.result = rendered.blob;
+        job.payload = { ...job.payload, filename: rendered.filename, mime: rendered.mime, duration: rendered.duration, notes: rendered.notes };
+        job.name = `${job.quality.passed ? 'QA PASS' : 'QA CHECK'} ${job.quality.score} · MP3`;
     }
 
     public clearCompleted() {

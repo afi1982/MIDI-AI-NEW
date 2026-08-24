@@ -82,7 +82,7 @@ const ChannelSelector: React.FC<ChannelSelectorProps> = ({ selectedChannels, onC
             </button>
         </div>
         
-        <div className="space-y-10 max-h-[450px] overflow-y-auto custom-scrollbar pr-3">
+        <div className="space-y-6 max-h-[32vh] md:max-h-[450px] overflow-y-auto custom-scrollbar pr-1 md:pr-3">
             {renderGroup('The Foundation', ALL_CHANNELS.filter(c => c.group === 'RHYTHM'))}
             {renderGroup('Drums & Percussion', ALL_CHANNELS.filter(c => c.group === 'DRUMS'))}
             {renderGroup('Melodic Elements', ALL_CHANNELS.filter(c => c.group === 'MELODY'))}
