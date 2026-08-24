@@ -100,4 +100,27 @@ if (buriedAcc < 0.65) {
   throw new Error(`Buried melody accuracy ${Math.round(buriedAcc * 100)}% is below 65%`);
 }
 
+const padMix = synthMix(sr);
+for (let i = 0; i < padMix.mix.length; i++) {
+  const t = i / sr;
+  padMix.mix[i] = padMix.mix[i] * 0.55
+    + 0.16 * Math.sin(2 * Math.PI * midiToHz(48) * t)
+    + 0.12 * Math.sin(2 * Math.PI * midiToHz(52) * t)
+    + 0.1 * Math.sin(2 * Math.PI * midiToHz(55) * t);
+}
+const padAnalysis = await analyzeBufferToStems(padMix.mix, sr);
+const maxLead = Math.ceil(padMix.expected.length * 2.2);
+if (padAnalysis.lead.length > maxLead) {
+  throw new Error(`Pad wash produced a jitter cloud: ${padAnalysis.lead.length} lead notes (max ${maxLead})`);
+}
+let padHits = 0;
+for (const exp of padMix.expected) {
+  const expTick = secToTick(exp.t, padAnalysis.sourceBpm || padAnalysis.bpm);
+  if (padAnalysis.lead.some((n) => Math.abs(midiOf(n.note) - exp.midi) <= 1 && Math.abs((n.startTick || 0) - expTick) < 300)) padHits++;
+}
+if (padHits / padMix.expected.length < 0.55) {
+  throw new Error(`Pad mix lost the melody (${Math.round((padHits / padMix.expected.length) * 100)}%)`);
+}
+console.log({ padLead: padAnalysis.lead.length, padHits, padPct: Math.round((padHits / padMix.expected.length) * 100) });
+
 console.log('AUDIO-TO-MIDI 1:1 CHECK PASSED');

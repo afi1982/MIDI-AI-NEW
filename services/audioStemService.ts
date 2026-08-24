@@ -38,8 +38,8 @@ export interface ArrangeOptions {
 const NFFT = 2048;
 const HOP = 256;
 const TARGET_SR = 22050;
-const LEAD_MIN = 46;
-const LEAD_MAX = 92;
+const LEAD_MIN = 55;
+const LEAD_MAX = 88;
 const GRID = 0.25;
 const TOP_K = 6;
 
@@ -238,6 +238,13 @@ function topCandidates(spec: Float32Array, nfft: number, sr: number, minM: numbe
   return picked;
 }
 
+function peakinessOf(cands: { m: number; s: number }[]) {
+  if (!cands[0]) return 0;
+  const rival = cands.find((c) => Math.abs(c.m - cands[0].m) > 2.4 && Math.abs(Math.abs(c.m - cands[0].m) - 12) > 1.6);
+  if (!rival) return 3;
+  return cands[0].s / (rival.s + 1e-9);
+}
+
 function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: number[]) {
   const T = cands.length;
   const K = TOP_K + 1;
@@ -246,19 +253,19 @@ function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: 
 
   const scores = rms.map((_, t) => (cands[t][0]?.s || 0));
   const sorted = scores.slice().sort((a, b) => a - b);
-  const med = sorted[Math.floor(sorted.length * 0.55)] || 1e-8;
+  const med = sorted[Math.floor(sorted.length * 0.62)] || 1e-8;
   const rmsSorted = rms.slice().sort((a, b) => a - b);
-  const noise = rmsSorted[Math.floor(rmsSorted.length * 0.2)] || 1e-5;
+  const noise = rmsSorted[Math.floor(rmsSorted.length * 0.25)] || 1e-5;
 
   for (let t = 0; t < T; t++) {
-    emit[t][0] = 0.08;
+    emit[t][0] = 0.22;
     midiOf[t][0] = -1;
+    const peaky = peakinessOf(cands[t]);
+    const clear = peaky >= 1.32 && (cands[t][0]?.s || 0) > med * 0.3 && rms[t] > noise * 1.7;
     for (let k = 0; k < TOP_K; k++) {
       const c = cands[t][k];
       if (!c) continue;
-      const voicedGate = c.s > med * 0.2 && rms[t] > noise * 1.6 ? 1 : 0.15;
-      const move = 1 + Math.min(1.4, (flux[t] || 0) * 8);
-      emit[t][k + 1] = Math.log(c.s + 1e-8) * voicedGate * move;
+      emit[t][k + 1] = Math.log(c.s + 1e-8) * (clear ? 1 : 0.08);
       midiOf[t][k + 1] = c.m;
     }
   }
@@ -268,15 +275,16 @@ function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: 
   for (let k = 0; k < K; k++) dp[0][k] = emit[0][k];
 
   const transCost = (a: number, b: number) => {
-    if (a < 0 && b < 0) return 0.15;
-    if (a < 0 || b < 0) return 1.35;
+    if (a < 0 && b < 0) return 0.05;
+    if (a < 0 || b < 0) return 1.85;
     const d = Math.abs(a - b);
-    if (d < 0.35) return 0;
-    if (d < 2.1) return 0.18 * d;
-    if (d < 5.5) return 0.55 * d;
+    if (d < 0.55) return 0;
+    if (d < 1.3) return 0.08 * d;
+    if (d < 3.2) return 0.75 * d;
+    if (d < 6) return 1.5 * d;
     const oct = Math.abs(d - 12);
-    if (oct < 1.1) return 2.1;
-    return 3.2 + 0.28 * d;
+    if (oct < 1.1) return 2.6;
+    return 4.2 + 0.35 * d;
   };
 
   for (let t = 1; t < T; t++) {
@@ -324,7 +332,13 @@ function viterbiTrack(cands: { m: number; s: number }[][], rms: number[], flux: 
     medianWin.push(path[t]);
     if (medianWin.length > 24) medianWin.shift();
   }
-  return path;
+  const smoothed = path.slice();
+  for (let t = 2; t < T - 2; t++) {
+    if (path[t] < 0) continue;
+    const win = [path[t - 2], path[t - 1], path[t], path[t + 1], path[t + 2]].filter((x) => x >= 0);
+    if (win.length >= 3) smoothed[t] = median(win);
+  }
+  return smoothed;
 }
 
 export function yinHz(frame: Float32Array, sr: number, minF: number, maxF: number): number | null {
@@ -441,8 +455,8 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
   const flush = () => {
     if (!group.length) return;
     const hold = group[group.length - 1].t - group[0].t + hop;
-    if (hold < 0.04) { group = []; return; }
-    const inner = group.slice(Math.floor(group.length * 0.15), Math.max(1, Math.ceil(group.length * 0.85)));
+    if (hold < 0.085 || group.length < 3) { group = []; return; }
+    const inner = group.slice(Math.floor(group.length * 0.2), Math.max(1, Math.ceil(group.length * 0.8)));
     const pitch = median((inner.length ? inner : group).map((g) => g.m));
     const vel = Math.min(1, group.reduce((a, g) => a + g.v, 0) / group.length);
     const bend = (pitch - Math.round(pitch)) * 4096;
@@ -453,8 +467,8 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
   for (let i = 1; i < voiced.length; i++) {
     const cur = voiced[i];
     const last = group[group.length - 1];
-    const same = Math.abs(cur.m - last.m) < 0.72;
-    const close = cur.t - last.t < hop * 2.4;
+    const same = Math.abs(cur.m - last.m) < 1.15;
+    const close = cur.t - last.t < hop * 2.8;
     if (same && close) group.push(cur);
     else {
       flush();
@@ -462,7 +476,37 @@ export function framesToNotes(frames: PitchFrame[], bpm: number): NoteEvent[] {
     }
   }
   flush();
-  return notes;
+  return stabilizeMelody(notes, bpm);
+}
+
+export function stabilizeMelody(notes: NoteEvent[], bpm: number): NoteEvent[] {
+  if (!notes.length) return [];
+  const minTicks = Math.round((0.09 * bpm * 480) / 60);
+  const sorted = notes.slice().sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
+  const merged: NoteEvent[] = [];
+  for (const raw of sorted) {
+    const n = { ...raw };
+    const last = merged[merged.length - 1];
+    if (!last) { merged.push(n); continue; }
+    const a = theoryEngine.getMidiNote(Array.isArray(last.note) ? last.note[0] : last.note);
+    const b = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
+    const lastEnd = (last.startTick || 0) + (last.durationTicks || 0);
+    const gap = (n.startTick || 0) - lastEnd;
+    if (Math.abs(a - b) <= 1 && gap < 70) {
+      last.durationTicks = Math.max(last.durationTicks || 0, (n.startTick || 0) + (n.durationTicks || 0) - (last.startTick || 0));
+      continue;
+    }
+    merged.push(n);
+  }
+  const kept = merged.filter((n) => (n.durationTicks || 0) >= minTicks);
+  const span = Math.max(1, ((kept[kept.length - 1]?.startTick || 0) + (kept[kept.length - 1]?.durationTicks || 0)) / ((bpm * 480) / 60));
+  const maxNotes = Math.max(10, span * 2.4);
+  if (kept.length <= maxNotes) return kept;
+  return kept
+    .slice()
+    .sort((a, b) => (b.durationTicks || 0) - (a.durationTicks || 0))
+    .slice(0, Math.floor(maxNotes))
+    .sort((a, b) => (a.startTick || 0) - (b.startTick || 0));
 }
 
 export function trackMelodyFromSpectrum(
@@ -545,7 +589,7 @@ export async function analyzeBufferToStems(
   const mono = downsample(slice, sampleRate, sr);
   const durationSec = slice.length / sampleRate;
 
-  const leadSrc = rbjLowpass(rbjHighpass(preEmphasis(mono, 0.93), sr, 180), sr, 4200);
+  const leadSrc = rbjLowpass(rbjHighpass(preEmphasis(mono, 0.93), sr, 260), sr, 3800);
   const low = rbjLowpass(rbjHighpass(mono, sr, 28), sr, 190);
   const high = rbjHighpass(mono, sr, 6200);
   const midBand = rbjLowpass(rbjHighpass(mono, sr, 180), sr, 900);
@@ -622,15 +666,16 @@ export async function analyzeBufferToStems(
 
   const secondFrames: PitchFrame[] = harmCands.map((cs, i) => {
     const leadM = melodyFrames[i]?.m ?? -1;
-    const alt = cs.find((c) => leadM < 0 || (Math.abs(c.m - leadM) > 2.2 && Math.abs(Math.abs(c.m - leadM) - 12) > 1.5));
+    const alt = cs.find((c) => leadM < 0 || (Math.abs(c.m - leadM) > 2.8 && Math.abs(Math.abs(c.m - leadM) - 12) > 1.8));
+    const peaky = peakinessOf(cs);
     return {
       t: i * hopSec,
       m: alt?.m ?? -1,
-      v: Math.min(0.55, 0.22 + (rmsArr[i] || 0) * 4),
-      voiced: !!alt && (alt.s > (cs[0]?.s || 1) * 0.35),
+      v: Math.min(0.45, 0.2 + (rmsArr[i] || 0) * 3),
+      voiced: !!alt && peaky >= 1.2 && (alt.s > (cs[0]?.s || 1) * 0.45),
     };
   });
-  const harmony = framesToNotes(secondFrames, detectedBpm).filter((n) => (n.durationTicks || 0) >= 240);
+  const harmony = framesToNotes(secondFrames, detectedBpm).filter((n) => (n.durationTicks || 0) >= 480);
 
   onProgress?.(74);
   const bassSr = 4000;
@@ -645,7 +690,7 @@ export async function analyzeBufferToStems(
 
   const kickHits = peakTimes(lowEnergy, hop, sr, 1.55, 0.12);
   const highFlux = simpleFlux(high, 256);
-  const hatHits = peakTimes(highFlux, 256, sr, 1.25, 0.05);
+  const hatHits = peakTimes(highFlux, 256, sr, 1.45, 0.14);
   const midFlux = simpleFlux(midBand, 256);
   const snareHits = peakTimes(midFlux, 256, sr, 1.7, 0.18);
   const kickMask = buildKickMask(kickHits, detectedBpm);
@@ -752,14 +797,14 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
 
   const lastTick = totalBars * 1920;
   groove.ch4_leadA = analysis.lead.map((n) => place(n, 0.08)).filter((n) => (n.startTick || 0) < lastTick);
-  groove.ch5_leadB = (analysis.harmony || []).map((n) => place(n)).filter((n) => (n.startTick || 0) < lastTick);
-  groove.ch2_sub = analysis.bassNotes.map((n) => place(n)).filter((n) => (n.startTick || 0) < lastTick);
-  groove.ch3_midBass = groove.ch2_sub
-    .filter((n: NoteEvent) => theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note) >= 36)
-    .map((n: NoteEvent) => {
-      const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-      return ev(m + (m < 40 ? 12 : 0), n.startTick || 0, Math.min(240, n.durationTicks || 120), 0.42);
-    });
+  groove.ch5_leadB = (analysis.harmony || [])
+    .filter((n) => (n.durationTicks || 0) >= 480)
+    .map((n) => place(n))
+    .filter((n) => (n.startTick || 0) < lastTick);
+  groove.ch2_sub = analysis.bassNotes
+    .filter((n) => (n.durationTicks || 0) >= 80)
+    .map((n) => place(n))
+    .filter((n) => (n.startTick || 0) < lastTick);
 
   analysis.kickHits.forEach((sec) => {
     const tick = Math.round(sec * bpm * 480 / 60);
@@ -784,10 +829,10 @@ export function arrangeTranceFromAnalysis(analysis: AudioStemAnalysis, options: 
     if (tick < lastTick) groove.ch12_hhClosed.push(ev(42, tick, 36, 0.52));
   });
 
-  const longPads = [...groove.ch5_leadB, ...groove.ch4_leadA.filter((n: NoteEvent) => (n.durationTicks || 0) >= 720)].slice(0, 100);
+  const longPads = [...groove.ch5_leadB, ...groove.ch4_leadA.filter((n: NoteEvent) => (n.durationTicks || 0) >= 960)].slice(0, 40);
   groove.ch15_pad = longPads.map((n: NoteEvent) => {
     const m = theoryEngine.getMidiNote(Array.isArray(n.note) ? n.note[0] : n.note);
-    return ev(m > 70 ? m - 12 : m, n.startTick || 0, Math.max(480, n.durationTicks || 480), 0.26);
+    return ev(m > 70 ? m - 12 : m, n.startTick || 0, Math.max(720, n.durationTicks || 720), 0.24);
   });
 
   groove.analysisMeta = {
